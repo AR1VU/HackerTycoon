@@ -1,0 +1,59 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom scrollbar for webkit browsers */
+.scrollbar-thin {
+  scrollbar-width: thin;
+}
+
+.scrollbar-thumb-green-600 {
+  scrollbar-color: #059669 transparent;
+}
+
+.scrollbar-track-black {
+  scrollbar-color: #059669 #000000;
+}
+
+/* Webkit scrollbar styling */
+.scrollbar-thin::-webkit-scrollbar {
+  width: 6px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: #000000;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: #059669;
+  border-radius: 3px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: #047857;
+}
+
+/* Ensure smooth scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Override default input autofill styles */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 30px black inset !important;
+  -webkit-text-fill-color: #4ade80 !important;
+}
+
+/* Selection colors */
+::selection {
+  background-color: #059669;
+  color: #ffffff;
+}
+
+::-moz-selection {
+  background-color: #059669;
+  color: #ffffff;
+}
