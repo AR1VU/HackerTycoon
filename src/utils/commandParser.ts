@@ -1,6 +1,21 @@
 import { Command, CommandResult } from '../types/terminal';
+import { NetworkNode } from '../types/network';
+import { getNodesInRadius } from './networkGenerator';
 
-const commands: Record<string, Command> = {
+interface CommandContext {
+  networkNodes: NetworkNode[];
+  playerPosition: { x: number; y: number };
+  onScan: (scannedNodes: NetworkNode[]) => void;
+  onConnect: (node: NetworkNode) => void;
+}
+
+let commandContext: CommandContext | null = null;
+
+export const setCommandContext = (context: CommandContext) => {
+  commandContext = context;
+};
+
+const getCommands = (): Record<string, Command> => ({
   help: {
     name: 'help',
     description: 'Display available commands',
@@ -13,6 +28,8 @@ const commands: Record<string, Command> = {
       '  whoami         - Display current user information',
       '  date           - Display current date and time',
       '  system         - Display system information',
+      '  scan           - Scan nearby network nodes',
+      '  connect [ip]   - Connect to a scanned network node',
       '',
       'Welcome to Hacker Tycoon v1.0',
       'Type commands to interact with the system.',
@@ -50,7 +67,94 @@ const commands: Record<string, Command> = {
       'Status: CONNECTED',
     ],
   },
-};
+  scan: {
+    name: 'scan',
+    description: 'Scan nearby network nodes',
+    execute: () => {
+      if (!commandContext) {
+        return ['Error: Network interface not initialized'];
+      }
+      
+      const { networkNodes, playerPosition, onScan } = commandContext;
+      const nearbyNodes = getNodesInRadius(networkNodes, playerPosition.x, playerPosition.y, 2);
+      
+      if (nearbyNodes.length === 0) {
+        return [
+          'Network scan complete.',
+          'No vulnerable nodes detected in range.',
+          'Try moving to a different location.',
+        ];
+      }
+      
+      // Mark nodes as scanned
+      const scannedNodes = nearbyNodes.map(node => ({ ...node, status: 'Scanned' as const }));
+      onScan(scannedNodes);
+      
+      const results = [
+        'Network scan initiated...',
+        `Scanning radius: 2 nodes`,
+        '',
+        `Found ${nearbyNodes.length} vulnerable node(s):`,
+        '',
+      ];
+      
+      nearbyNodes.forEach(node => {
+        const riskColor = node.vulnerability === 'High' ? '[HIGH RISK]' : 
+                         node.vulnerability === 'Medium' ? '[MEDIUM RISK]' : '[LOW RISK]';
+        results.push(`  ${node.ip} - ${riskColor}`);
+      });
+      
+      results.push('');
+      results.push('Use "connect [ip]" to establish connection.');
+      
+      return results;
+    },
+  },
+  connect: {
+    name: 'connect',
+    description: 'Connect to a scanned network node',
+    execute: (args) => {
+      if (!commandContext) {
+        return ['Error: Network interface not initialized'];
+      }
+      
+      if (args.length === 0) {
+        return ['Usage: connect [ip]', 'Example: connect 192.168.1.100'];
+      }
+      
+      const targetIp = args[0];
+      const { networkNodes, onConnect } = commandContext;
+      const targetNode = networkNodes.find(node => node.ip === targetIp);
+      
+      if (!targetNode) {
+        return [`Error: IP address ${targetIp} not found in network.`];
+      }
+      
+      if (targetNode.status !== 'Scanned') {
+        return [
+          `Error: Cannot connect to ${targetIp}`,
+          'Node must be scanned first. Use "scan" command.',
+        ];
+      }
+      
+      if (targetNode.isPlayerLocation) {
+        return ['Error: Cannot connect to your own location.'];
+      }
+      
+      // Trigger connection
+      onConnect(targetNode);
+      
+      return [
+        `Initiating connection to ${targetIp}...`,
+        'Establishing secure tunnel...',
+        'Bypassing firewall...',
+        `Successfully connected to ${targetIp}`,
+        '',
+        'Connection details displayed in popup window.',
+      ];
+    },
+  },
+});
 
 export const parseCommand = (input: string): CommandResult => {
   const trimmedInput = input.trim();
@@ -64,6 +168,7 @@ export const parseCommand = (input: string): CommandResult => {
     };
   }
 
+  const commands = getCommands();
   const command = commands[commandName.toLowerCase()];
   
   if (!command) {
@@ -91,5 +196,5 @@ export const parseCommand = (input: string): CommandResult => {
 };
 
 export const getAvailableCommands = (): Command[] => {
-  return Object.values(commands);
+  return Object.values(getCommands());
 };
