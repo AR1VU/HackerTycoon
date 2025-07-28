@@ -3,7 +3,9 @@ import { useState, useCallback } from 'react';
 import Terminal from './components/Terminal';
 import NetworkMap from './components/NetworkMap';
 import ConnectionModal from './components/ConnectionModal';
+import DownloadsPanel from './components/DownloadsPanel';
 import { NetworkNode } from './types/network';
+import { DownloadedFile } from './types/filesystem';
 import { generateNetworkGrid } from './utils/networkGenerator';
 import { setCommandContext } from './utils/commandParser';
 
@@ -12,6 +14,8 @@ function App() {
   const [playerPosition] = useState({ x: 5, y: 5 }); // Center of 10x10 grid
   const [connectedNode, setConnectedNode] = useState<NetworkNode | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [downloads, setDownloads] = useState<DownloadedFile[]>([]);
+  const [isDownloadsOpen, setIsDownloadsOpen] = useState(false);
 
   // Handle scanning - update node statuses
   const handleScan = useCallback((scannedNodes: NetworkNode[]) => {
@@ -41,15 +45,27 @@ function App() {
     handleConnect(node);
   }, [handleConnect]);
 
+  // Handle file downloads
+  const handleDownload = useCallback((file: DownloadedFile) => {
+    setDownloads(prev => [...prev, file]);
+  }, []);
+
+  // Handle showing downloads panel
+  const handleShowDownloads = useCallback(() => {
+    setIsDownloadsOpen(true);
+  }, []);
+
   // Set up command context for terminal
   React.useEffect(() => {
     setCommandContext({
       networkNodes,
       playerPosition,
+      downloads,
       onScan: handleScan,
       onConnect: handleConnect,
+      onShowDownloads: handleShowDownloads,
     });
-  }, [networkNodes, playerPosition, handleScan, handleConnect]);
+  }, [networkNodes, playerPosition, downloads, handleScan, handleConnect, handleShowDownloads]);
 
   return (
     <div className="min-h-screen bg-black bg-gradient-to-br from-gray-900 via-black to-gray-900">
@@ -86,6 +102,14 @@ function App() {
         node={connectedNode}
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
+        onDownload={handleDownload}
+      />
+      
+      {/* Downloads Panel */}
+      <DownloadsPanel
+        downloads={downloads}
+        isOpen={isDownloadsOpen}
+        onClose={() => setIsDownloadsOpen(false)}
       />
       
       {/* Ambient lighting effects */}

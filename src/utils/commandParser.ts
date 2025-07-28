@@ -1,12 +1,15 @@
 import { Command, CommandResult } from '../types/terminal';
 import { NetworkNode } from '../types/network';
+import { DownloadedFile } from '../types/filesystem';
 import { getNodesInRadius } from './networkGenerator';
 
 interface CommandContext {
   networkNodes: NetworkNode[];
   playerPosition: { x: number; y: number };
+  downloads: DownloadedFile[];
   onScan: (scannedNodes: NetworkNode[]) => void;
   onConnect: (node: NetworkNode) => void;
+  onShowDownloads: () => void;
 }
 
 let commandContext: CommandContext | null = null;
@@ -30,6 +33,7 @@ const getCommands = (): Record<string, Command> => ({
       '  system         - Display system information',
       '  scan           - Scan nearby network nodes',
       '  connect [ip]   - Connect to a scanned network node',
+      '  downloads      - View downloaded files',
       '',
       'Welcome to Hacker Tycoon v1.0',
       'Type commands to interact with the system.',
@@ -151,6 +155,24 @@ const getCommands = (): Record<string, Command> => ({
         `Successfully connected to ${targetIp}`,
         '',
         'Connection details displayed in popup window.',
+      ];
+    },
+  },
+  downloads: {
+    name: 'downloads',
+    description: 'View downloaded files',
+    execute: () => {
+      if (!commandContext) {
+        return ['Error: Downloads system not initialized'];
+      }
+      
+      const { downloads, onShowDownloads } = commandContext;
+      onShowDownloads();
+      
+      return [
+        `Opening downloads panel...`,
+        `Total files: ${downloads.length}`,
+        downloads.length === 0 ? 'No files downloaded yet.' : 'Downloads panel opened.',
       ];
     },
   },
