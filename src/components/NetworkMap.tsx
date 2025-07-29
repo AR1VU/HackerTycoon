@@ -13,6 +13,10 @@ const NetworkMap: React.FC<NetworkMapProps> = ({ nodes, onNodeClick, playerPosit
   const getNodeColor = (node: NetworkNode): string => {
     if (node.isPlayerLocation) return 'bg-cyan-400';
     
+    if (node.isTemporarilyDown && node.downUntil && Date.now() < node.downUntil) {
+      return 'bg-gray-900';
+    }
+    
     switch (node.status) {
       case 'Hidden':
         return 'bg-gray-700';
@@ -23,6 +27,12 @@ const NetworkMap: React.FC<NetworkMapProps> = ({ nodes, onNodeClick, playerPosit
           case 'High': return 'bg-red-500';
           default: return 'bg-green-500';
         }
+      case 'Bruteforced':
+        return 'bg-blue-500';
+      case 'Connected':
+        return 'bg-cyan-500';
+      case 'Bypassed':
+        return 'bg-orange-500';
       case 'Hacked':
         return 'bg-purple-500';
       default:
@@ -32,13 +42,17 @@ const NetworkMap: React.FC<NetworkMapProps> = ({ nodes, onNodeClick, playerPosit
   
   const getNodeBorder = (node: NetworkNode): string => {
     if (node.isPlayerLocation) return 'border-cyan-300 border-2';
+    if (node.isTemporarilyDown && node.downUntil && Date.now() < node.downUntil) return 'border-gray-700 border';
+    if (node.status === 'Bruteforced') return 'border-blue-300 border';
+    if (node.status === 'Connected') return 'border-cyan-300 border';
+    if (node.status === 'Bypassed') return 'border-orange-300 border';
     if (node.status === 'Scanned') return 'border-green-300 border';
     if (node.status === 'Hacked') return 'border-purple-300 border';
     return 'border-gray-600 border';
   };
   
   const handleNodeClick = (node: NetworkNode) => {
-    if (node.status === 'Scanned' && !node.isPlayerLocation) {
+    if ((node.status === 'Bruteforced' || node.status === 'Connected') && !node.isPlayerLocation) {
       onNodeClick(node);
     }
   };
@@ -81,8 +95,24 @@ const NetworkMap: React.FC<NetworkMapProps> = ({ nodes, onNodeClick, playerPosit
           <span>High Risk</span>
         </div>
         <div className="flex items-center space-x-2">
+          <div className="w-3 h-3 bg-blue-500 border border-blue-300"></div>
+          <span>Bruteforced</span>
+        </div>
+        <div className="flex items-center space-x-2">
+          <div className="w-3 h-3 bg-cyan-500 border border-cyan-300"></div>
+          <span>Connected</span>
+        </div>
+        <div className="flex items-center space-x-2">
+          <div className="w-3 h-3 bg-orange-500 border border-orange-300"></div>
+          <span>Bypassed</span>
+        </div>
+        <div className="flex items-center space-x-2">
           <div className="w-3 h-3 bg-purple-500 border border-purple-300"></div>
           <span>Compromised</span>
+        </div>
+        <div className="flex items-center space-x-2">
+          <div className="w-3 h-3 bg-gray-900 border border-gray-700"></div>
+          <span>Server Down</span>
         </div>
       </div>
       
@@ -106,6 +136,17 @@ const NetworkMap: React.FC<NetworkMapProps> = ({ nodes, onNodeClick, playerPosit
           ))}
         </div>
         
+        {/* Hack History Info */}
+        {hoveredNode && hoveredNode.hackHistory && hoveredNode.hackHistory.length > 0 && (
+          <div className="mt-2 text-xs text-green-300">
+            <div className="font-bold">Hack History:</div>
+            <div>
+              Attempts: {hoveredNode.hackHistory.length} | 
+              Success: {hoveredNode.hackHistory.filter(h => h.success).length}
+            </div>
+          </div>
+        )}
+        
         {/* Tooltip */}
         {hoveredNode && (
           <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 bg-black border border-green-400 rounded px-2 py-1 text-green-400 text-xs whitespace-nowrap z-10">
@@ -117,7 +158,7 @@ const NetworkMap: React.FC<NetworkMapProps> = ({ nodes, onNodeClick, playerPosit
       </div>
       
       <div className="mt-4 text-xs text-green-300 text-center">
-        Use 'scan' to discover nearby nodes • Click scanned nodes to connect
+        Scan → Bruteforce → Connect → Bypass → Download/Inject
       </div>
     </div>
   );

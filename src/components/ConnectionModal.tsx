@@ -84,10 +84,23 @@ const ConnectionModal: React.FC<ConnectionModalProps> = ({ node, isOpen, onClose
             <div className="space-y-2">
               <button
                 onClick={handleAccessFileSystem}
-                className="w-full bg-blue-600 hover:bg-blue-500 text-white font-mono font-bold py-2 px-4 rounded transition-colors"
+                className={`w-full font-mono font-bold py-2 px-4 rounded transition-colors ${
+                  node.status === 'Bypassed' || node.status === 'Hacked'
+                    ? 'bg-blue-600 hover:bg-blue-500 text-white'
+                    : 'bg-gray-600 text-gray-300 cursor-not-allowed'
+                }`}
+                disabled={node.status !== 'Bypassed' && node.status !== 'Hacked'}
               >
-                Access File System
+                {node.status === 'Bypassed' || node.status === 'Hacked' 
+                  ? 'Access File System' 
+                  : 'File System Locked'
+                }
               </button>
+              {(node.status === 'Connected') && (
+                <div className="text-center text-yellow-400 text-sm">
+                  Use 'bypass' command to unlock file system
+                </div>
+              )}
               <button
                 onClick={onClose}
                 className="w-full bg-green-600 hover:bg-green-500 text-black font-mono font-bold py-2 px-4 rounded transition-colors"

@@ -17,6 +17,9 @@ interface ServerCommandResult {
 }
 
 const ServerTerminal: React.FC<ServerTerminalProps> = ({ node, isOpen, onClose, onDownload }) => {
+  // Check if server can be accessed
+  const canAccess = node.status === 'Bypassed' || node.status === 'Hacked';
+  
   const [fileSystem] = useState<FileSystem>(() => ({
     root: generateFileSystem(),
     currentPath: []
@@ -66,6 +69,15 @@ const ServerTerminal: React.FC<ServerTerminalProps> = ({ node, isOpen, onClose, 
 
   const executeCommand = (input: string): string[] => {
     const [command, ...args] = input.trim().split(' ');
+    
+    // Check access for file system commands
+    if (!canAccess && ['ls', 'cd', 'cat', 'download'].includes(command.toLowerCase())) {
+      return [
+        'Access Denied: Firewall protection active',
+        'Use "bypass" command in main terminal first',
+        'File system access requires bypassing security measures'
+      ];
+    }
     
     switch (command.toLowerCase()) {
       case 'ls':
@@ -318,12 +330,25 @@ const ServerTerminal: React.FC<ServerTerminalProps> = ({ node, isOpen, onClose, 
               <div className="text-blue-300 mb-2">
                 Connected to {node.ip}
               </div>
-              <div className="text-blue-400 mb-2">
-                File system access granted. Type 'help' for available commands.
-              </div>
-              <div className="text-blue-400 mb-4">
-                Use 'download [filename]' to copy files to your local system.
-              </div>
+              {canAccess ? (
+                <>
+                  <div className="text-blue-400 mb-2">
+                    File system access granted. Type 'help' for available commands.
+                  </div>
+                  <div className="text-blue-400 mb-4">
+                    Use 'download [filename]' to copy files to your local system.
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="text-red-400 mb-2">
+                    Access Denied: Firewall protection active
+                  </div>
+                  <div className="text-yellow-400 mb-4">
+                    Use 'bypass' command in main terminal to gain file system access
+                  </div>
+                </>
+              )}
             </div>
           )}
           

@@ -2,7 +2,11 @@ import React, { useState, useRef, useEffect } from 'react';
 import { parseCommand } from '../utils/commandParser';
 import { CommandResult } from '../types/terminal';
 
-const Terminal: React.FC = () => {
+interface TerminalProps {
+  toolProgress?: { progress: number; message: string } | null;
+}
+
+const Terminal: React.FC<TerminalProps> = ({ toolProgress }) => {
   const [history, setHistory] = useState<CommandResult[]>([]);
   const [currentInput, setCurrentInput] = useState('');
   const [commandHistory, setCommandHistory] = useState<string[]>([]);
@@ -148,6 +152,22 @@ const Terminal: React.FC = () => {
             ))}
           </div>
         ))}
+        
+        {/* Tool Progress Display */}
+        {toolProgress && (
+          <div className="mb-4 p-3 bg-yellow-900/20 border border-yellow-400/30 rounded">
+            <div className="text-yellow-400 mb-2">{toolProgress.message}</div>
+            <div className="w-full bg-gray-800 rounded-full h-2">
+              <div 
+                className="bg-yellow-400 h-2 rounded-full transition-all duration-500"
+                style={{ width: `${toolProgress.progress}%` }}
+              />
+            </div>
+            <div className="text-yellow-300 text-sm mt-1">
+              Progress: {Math.round(toolProgress.progress)}%
+            </div>
+          </div>
+        )}
         
         {/* Current input line */}
         <form onSubmit={handleSubmit} className="flex items-center">
