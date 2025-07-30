@@ -131,6 +131,9 @@ const Terminal: React.FC<TerminalProps> = ({ toolProgress }) => {
             <div className="text-green-400 mb-4">
               Type 'help' to see available commands.
             </div>
+            <div className="text-yellow-400 mb-2">
+              💡 New: Use 'skills' command to view your skill tree!
+            </div>
           </div>
         )}
         

@@ -1,6 +1,7 @@
 import { NetworkNode } from '../types/network';
 import { HackingTool } from '../types/tools';
 import { DownloadedFile } from '../types/filesystem';
+import { SkillTreeState } from '../types/skills';
 
 const STORAGE_KEYS = {
   NETWORK_NODES: 'hackerTycoon_networkNodes',
@@ -15,6 +16,7 @@ export interface GameState {
   tools: HackingTool[];
   downloads: DownloadedFile[];
   playerPosition: { x: number; y: number };
+  skillTree?: SkillTreeState;
   lastSaved: Date;
 }
 

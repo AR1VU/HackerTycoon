@@ -10,10 +10,13 @@ import ResetButton from './components/ResetButton';
 import { NetworkNode } from './types/network';
 import { DownloadedFile } from './types/filesystem';
 import { HackingTool } from './types/tools';
+import { SkillNode, SkillTreeState } from './types/skills';
 import { generateNetworkGrid } from './utils/networkGenerator';
 import { setCommandContext } from './utils/commandParser';
 import { DEFAULT_TOOLS, unlockTool } from './utils/toolsManager';
+import { DEFAULT_SKILL_TREE, getDefaultPlayerStats, calculatePlayerStats, awardSkillPoints } from './utils/skillTree';
 import { saveGameState, loadGameState, resetGameState, hasExistingGameState } from './utils/storageManager';
+import SkillTreePanel from './components/SkillTreePanel';
 
 function App() {
   // Initialize state from localStorage or defaults
@@ -57,6 +60,29 @@ function App() {
   const [isToolsOpen, setIsToolsOpen] = useState(false);
   const [isHackHistoryOpen, setIsHackHistoryOpen] = useState(false);
   const [toolProgress, setToolProgress] = useState<{ progress: number; message: string } | null>(null);
+  
+  const [skillTree, setSkillTree] = useState<SkillTreeState>(() => {
+    if (hasExistingGameState()) {
+      const savedState = loadGameState();
+      return {
+        nodes: savedState.skillTree?.nodes || DEFAULT_SKILL_TREE,
+        skillPoints: savedState.skillTree?.skillPoints || 0,
+        totalPointsEarned: savedState.skillTree?.totalPointsEarned || 0
+      };
+    }
+    return {
+      nodes: DEFAULT_SKILL_TREE,
+      skillPoints: 0,
+      totalPointsEarned: 0
+    };
+  });
+  
+  const [isSkillTreeOpen, setIsSkillTreeOpen] = useState(false);
+  const [playerStats, setPlayerStats] = useState(() => {
+    const baseStats = getDefaultPlayerStats();
+    const skillBonuses = calculatePlayerStats(skillTree.nodes);
+    return { ...baseStats, ...skillBonuses };
+  });
 
   // Handle scanning - update node statuses
 
@@ -129,6 +155,11 @@ function App() {
   const handleShowHackHistory = useCallback(() => {
     setIsHackHistoryOpen(true);
   }, []);
+  
+  // Handle showing skill tree panel
+  const handleShowSkillTree = useCallback(() => {
+    setIsSkillTreeOpen(true);
+  }, []);
 
   // Handle updating tools
   const handleUpdateTools = useCallback((updatedTools: HackingTool[]) => {
@@ -146,6 +177,41 @@ function App() {
       setTimeout(() => setToolProgress(null), 2000);
     }
   }, []);
+  
+  // Handle skill tree updates
+  const handleUpdateSkillTree = useCallback((updatedNodes: SkillNode[], remainingPoints: number) => {
+    const newSkillTree = {
+      nodes: updatedNodes,
+      skillPoints: remainingPoints,
+      totalPointsEarned: skillTree.totalPointsEarned
+    };
+    
+    setSkillTree(newSkillTree);
+    
+    // Update player stats based on purchased skills
+    const baseStats = getDefaultPlayerStats();
+    const skillBonuses = calculatePlayerStats(updatedNodes);
+    setPlayerStats({ ...baseStats, ...skillBonuses });
+    
+    // Save to localStorage
+    saveGameState({ skillTree: newSkillTree });
+  }, [skillTree.totalPointsEarned]);
+  
+  // Handle successful hack completion (award skill points)
+  const handleHackSuccess = useCallback(() => {
+    const newSkillPoints = awardSkillPoints(skillTree.skillPoints, playerStats.hacksCompleted + 1);
+    const newSkillTree = {
+      ...skillTree,
+      skillPoints: newSkillPoints,
+      totalPointsEarned: skillTree.totalPointsEarned + (newSkillPoints - skillTree.skillPoints)
+    };
+    
+    setSkillTree(newSkillTree);
+    setPlayerStats(prev => ({ ...prev, hacksCompleted: prev.hacksCompleted + 1 }));
+    
+    // Save to localStorage
+    saveGameState({ skillTree: newSkillTree });
+  }, [skillTree, playerStats.hacksCompleted]);
 
   // Handle game reset
   const handleReset = useCallback(() => {
@@ -153,14 +219,23 @@ function App() {
     
     // Reset all state to defaults
     const newNetworkNodes = generateNetworkGrid();
+    const newSkillTree = {
+      nodes: DEFAULT_SKILL_TREE,
+      skillPoints: 0,
+      totalPointsEarned: 0
+    };
+    
     setNetworkNodes(newNetworkNodes);
     setDownloads([]);
     setTools(DEFAULT_TOOLS);
+    setSkillTree(newSkillTree);
+    setPlayerStats(getDefaultPlayerStats());
     setConnectedNode(null);
     setIsModalOpen(false);
     setIsDownloadsOpen(false);
     setIsToolsOpen(false);
     setIsHackHistoryOpen(false);
+    setIsSkillTreeOpen(false);
     setToolProgress(null);
     
     // Save initial state
@@ -168,6 +243,7 @@ function App() {
       networkNodes: newNetworkNodes,
       downloads: [],
       tools: DEFAULT_TOOLS,
+      skillTree: newSkillTree,
       playerPosition: { x: 5, y: 5 }
     });
   }, []);
@@ -179,15 +255,19 @@ function App() {
       playerPosition,
       downloads,
       tools,
+      skillTree,
+      playerStats,
       onScan: handleScanWithNodes,
       onConnect: handleConnect,
       onShowDownloads: handleShowDownloads,
       onShowTools: handleShowTools,
       onShowHackHistory: handleShowHackHistory,
+      onShowSkillTree: handleShowSkillTree,
       onUpdateTools: handleUpdateTools,
       onToolProgress: handleToolProgress,
+      onHackSuccess: handleHackSuccess,
     });
-  }, [networkNodes, playerPosition, downloads, tools, handleScanWithNodes, handleConnect, handleShowDownloads, handleShowTools, handleShowHackHistory, handleUpdateTools, handleToolProgress]);
+  }, [networkNodes, playerPosition, downloads, tools, skillTree, playerStats, handleScanWithNodes, handleConnect, handleShowDownloads, handleShowTools, handleShowHackHistory, handleShowSkillTree, handleUpdateTools, handleToolProgress, handleHackSuccess]);
 
   return (
     <div className="min-h-screen bg-black bg-gradient-to-br from-gray-900 via-black to-gray-900">
@@ -246,6 +326,14 @@ function App() {
         nodes={networkNodes}
         isOpen={isHackHistoryOpen}
         onClose={() => setIsHackHistoryOpen(false)}
+      />
+      
+      {/* Skill Tree Panel */}
+      <SkillTreePanel
+        skillTree={skillTree}
+        isOpen={isSkillTreeOpen}
+        onClose={() => setIsSkillTreeOpen(false)}
+        onUpdateSkillTree={handleUpdateSkillTree}
       />
       
       {/* Reset Button */}

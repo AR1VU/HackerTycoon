@@ -2,6 +2,7 @@ import { Command, CommandResult } from '../types/terminal';
 import { NetworkNode } from '../types/network';
 import { DownloadedFile } from '../types/filesystem';
 import { HackingTool, ToolResult } from '../types/tools';
+import { SkillTreeState, PlayerStats } from '../types/skills';
 import { getNodesInRadius } from './networkGenerator';
 import { 
   checkToolCooldown, 
@@ -16,6 +17,8 @@ interface CommandContext {
   playerPosition: { x: number; y: number };
   downloads: DownloadedFile[];
   tools: HackingTool[];
+  skillTree: SkillTreeState;
+  playerStats: PlayerStats;
   onScan: (scannedNodes: NetworkNode[]) => void;
   onConnect: (node: NetworkNode) => void;
   onShowDownloads: () => void;
@@ -23,6 +26,8 @@ interface CommandContext {
   onShowHackHistory: () => void;
   onUpdateTools: (tools: HackingTool[]) => void;
   onToolProgress: (progress: number, message: string) => void;
+  onShowSkillTree: () => void;
+  onHackSuccess: () => void;
 }
 
 let commandContext: CommandContext | null = null;
@@ -38,21 +43,29 @@ const getCommands = (): Record<string, Command> => ({
     execute: () => [
       'Available commands:',
       '',
+      '📋 SYSTEM COMMANDS:',
       '  help           - Display this help message',
       '  clear          - Clear the terminal screen',
       '  echo [text]    - Print text to the terminal',
       '  whoami         - Display current user information',
       '  date           - Display current date and time',
       '  system         - Display system information',
+      '',
+      '🔍 NETWORK COMMANDS:',
       '  scan           - Scan nearby network nodes',
       '  connect [ip]   - Connect to a scanned network node',
+      '',
+      '⚔️  HACKING TOOLS:',
+      '  bruteforce [ip]        - Brute force attack on target',
+      '  ddos [ip]              - DDoS attack on target',
+      '  inject [ip] [script]   - Code injection attack',
+      '  bypass [ip] [firewall] - Bypass firewall protection',
+      '',
+      '📊 MANAGEMENT PANELS:',
       '  downloads      - View downloaded files',
       '  tools          - View available hacking tools',
       '  history        - View hack history and statistics',
-      '  bruteforce [ip] - Brute force attack on target',
-      '  ddos [ip]      - DDoS attack on target',
-      '  inject [ip] [script] - Code injection attack',
-      '  bypass [ip] [firewall] - Bypass firewall protection',
+      '  skills         - View and manage skill tree',
       '',
       'Welcome to Hacker Tycoon v1.0',
       'Type commands to interact with the system.',
@@ -98,8 +111,9 @@ const getCommands = (): Record<string, Command> => ({
         return ['Error: Network interface not initialized'];
       }
       
-      const { networkNodes, playerPosition, onScan } = commandContext;
-      const nearbyNodes = getNodesInRadius(networkNodes, playerPosition.x, playerPosition.y, 2);
+      const { networkNodes, playerPosition, playerStats, onScan } = commandContext;
+      const scanRadius = playerStats.scanRadius || 2;
+      const nearbyNodes = getNodesInRadius(networkNodes, playerPosition.x, playerPosition.y, scanRadius);
       
       if (nearbyNodes.length === 0) {
         return [
@@ -115,7 +129,7 @@ const getCommands = (): Record<string, Command> => ({
       
       const results = [
         'Network scan initiated...',
-        `Scanning radius: 2 nodes`,
+        `Scanning radius: ${scanRadius} nodes`,
         '',
         `Found ${nearbyNodes.length} vulnerable node(s):`,
         '',
@@ -242,6 +256,29 @@ const getCommands = (): Record<string, Command> => ({
       ];
     },
   },
+  skills: {
+    name: 'skills',
+    description: 'View and manage skill tree',
+    execute: () => {
+      if (!commandContext) {
+        return ['Error: Skills system not initialized'];
+      }
+      
+      const { skillTree, onShowSkillTree } = commandContext;
+      onShowSkillTree();
+      
+      const purchased = skillTree.nodes.filter(s => s.purchased).length;
+      const available = skillTree.nodes.filter(s => s.unlocked && !s.purchased).length;
+      
+      return [
+        'Opening skill tree panel...',
+        `Skill Points: ${skillTree.skillPoints}`,
+        `Skills Purchased: ${purchased}/${skillTree.nodes.length}`,
+        `Skills Available: ${available}`,
+        'Skill tree panel opened.',
+      ];
+    },
+  },
   bruteforce: {
     name: 'bruteforce',
     description: 'Brute force attack on target system',
@@ -269,7 +306,7 @@ const executeHackingTool = (toolId: string, args: string[]): string[] => {
     return ['Error: Tools system not initialized'];
   }
   
-  const { tools, networkNodes, onUpdateTools, onToolProgress, onScan } = commandContext;
+  const { tools, networkNodes, playerStats, onUpdateTools, onToolProgress, onScan, onHackSuccess } = commandContext;
   
   // Find the tool
   const tool = tools.find(t => t.id === toolId);
@@ -379,6 +416,9 @@ const executeHackingTool = (toolId: string, args: string[]): string[] => {
       
       // Update node status based on successful tool execution
       if (result.success) {
+        // Award skill points for successful hack
+        onHackSuccess();
+        
         updatedNodes = updatedNodes.map(node => {
           if (node.id === targetNode.id) {
             if (toolId === 'bruteforce') {
