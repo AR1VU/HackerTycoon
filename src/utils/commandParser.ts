@@ -3,6 +3,7 @@ import { NetworkNode } from '../types/network';
 import { DownloadedFile } from '../types/filesystem';
 import { HackingTool, ToolResult } from '../types/tools';
 import { SkillTreeState, PlayerStats } from '../types/skills';
+import { CryptoWallet, CryptoMarket } from '../types/crypto';
 import { getNodesInRadius } from './networkGenerator';
 import { 
   checkToolCooldown, 
@@ -10,6 +11,12 @@ import {
   simulateToolExecution,
   updateToolLastUsed 
 } from './toolsManager';
+import { 
+  formatCurrency, 
+  formatUSD, 
+  calculateHackReward, 
+  addTransaction 
+} from '../utils/cryptoManager';
 import { addHackAttempt } from './hackTracker';
 
 interface CommandContext {
@@ -18,13 +25,17 @@ interface CommandContext {
   downloads: DownloadedFile[];
   tools: HackingTool[];
   skillTree: SkillTreeState;
+  cryptoWallet: CryptoWallet;
+  cryptoMarket: CryptoMarket;
   playerStats: PlayerStats;
   onScan: (scannedNodes: NetworkNode[]) => void;
   onConnect: (node: NetworkNode) => void;
   onShowDownloads: () => void;
   onShowTools: () => void;
   onShowHackHistory: () => void;
+  onShowCryptoWallet: () => void;
   onUpdateTools: (tools: HackingTool[]) => void;
+  onUpdateCryptoWallet: (wallet: CryptoWallet) => void;
   onToolProgress: (progress: number, message: string) => void;
   onShowSkillTree: () => void;
   onHackSuccess: () => void;
@@ -66,6 +77,8 @@ const getCommands = (): Record<string, Command> => ({
       '  tools          - View available hacking tools',
       '  history        - View hack history and statistics',
       '  skills         - View and manage skill tree',
+      '  wallet         - View ɄCoin wallet and balance',
+      '  market         - View current ɄCoin exchange rate',
       '',
       'Welcome to Hacker Tycoon v1.0',
       'Type commands to interact with the system.',
@@ -279,6 +292,90 @@ const getCommands = (): Record<string, Command> => ({
       ];
     },
   },
+  wallet: {
+    name: 'wallet',
+    description: 'View ɄCoin wallet and balance',
+    execute: () => {
+      if (!commandContext) {
+        return ['Error: Wallet system not initialized'];
+      }
+      
+      const { cryptoWallet, cryptoMarket, onShowCryptoWallet } = commandContext;
+      onShowCryptoWallet();
+      
+      const usdValue = cryptoWallet.balance * cryptoMarket.currentRate;
+      const recentTransactions = cryptoWallet.transactions.slice(0, 3);
+      
+      const output = [
+        '╔══════════════════════════════════════════════════════════════╗',
+        '║                        ɄCoin WALLET                          ║',
+        '╚══════════════════════════════════════════════════════════════╝',
+        '',
+        `Balance: ${formatCurrency(cryptoWallet.balance)}`,
+        `USD Value: ${formatUSD(usdValue)} (1Ʉ = ${formatUSD(cryptoMarket.currentRate)})`,
+        '',
+        'Recent Transactions:',
+      ];
+      
+      if (recentTransactions.length === 0) {
+        output.push('  No recent transactions');
+      } else {
+        recentTransactions.forEach(tx => {
+          const sign = tx.type === 'spent' ? '-' : '+';
+          const date = tx.timestamp.toLocaleDateString();
+          output.push(`  ${sign}${formatCurrency(tx.amount)} - ${tx.description} (${date})`);
+        });
+      }
+      
+      output.push('');
+      output.push('Wallet panel opened for detailed view.');
+      
+      return output;
+    },
+  },
+  market: {
+    name: 'market',
+    description: 'View current ɄCoin exchange rate',
+    execute: () => {
+      if (!commandContext) {
+        return ['Error: Market system not initialized'];
+      }
+      
+      const { cryptoMarket } = commandContext;
+      
+      // Calculate trend
+      let trendInfo = '';
+      if (cryptoMarket.history.length >= 2) {
+        const current = cryptoMarket.history[0].rate;
+        const previous = cryptoMarket.history[1].rate;
+        const change = ((current - previous) / previous) * 100;
+        
+        if (change > 0.1) {
+          trendInfo = `📈 +${change.toFixed(2)}%`;
+        } else if (change < -0.1) {
+          trendInfo = `📉 ${change.toFixed(2)}%`;
+        } else {
+          trendInfo = '➡️  Stable';
+        }
+      }
+      
+      const lastUpdate = cryptoMarket.lastUpdate.toLocaleTimeString();
+      
+      return [
+        '╔══════════════════════════════════════════════════════════════╗',
+        '║                      ɄCoin MARKET                            ║',
+        '╚══════════════════════════════════════════════════════════════╝',
+        '',
+        `Current Rate: 1Ʉ = ${formatUSD(cryptoMarket.currentRate)}`,
+        `Trend: ${trendInfo}`,
+        `Last Update: ${lastUpdate}`,
+        '',
+        '💡 Market updates automatically every minute',
+        '💰 Earn ɄCoins by successfully hacking targets',
+        '🛒 Use coins to purchase advanced tools and upgrades',
+      ];
+    },
+  },
   bruteforce: {
     name: 'bruteforce',
     description: 'Brute force attack on target system',
@@ -306,7 +403,7 @@ const executeHackingTool = (toolId: string, args: string[]): string[] => {
     return ['Error: Tools system not initialized'];
   }
   
-  const { tools, networkNodes, playerStats, onUpdateTools, onToolProgress, onScan, onHackSuccess } = commandContext;
+  const { tools, networkNodes, playerStats, cryptoWallet, onUpdateTools, onUpdateCryptoWallet, onToolProgress, onScan, onHackSuccess } = commandContext;
   
   // Find the tool
   const tool = tools.find(t => t.id === toolId);
@@ -418,6 +515,16 @@ const executeHackingTool = (toolId: string, args: string[]): string[] => {
       if (result.success) {
         // Award skill points for successful hack
         onHackSuccess();
+        
+        // Award ɄCoins for successful hack
+        const reward = calculateHackReward(targetNode.vulnerability, toolId);
+        const updatedWallet = addTransaction(
+          cryptoWallet,
+          'earned',
+          reward,
+          `Successful ${tool.name} on ${targetIp} (${targetNode.vulnerability} risk)`
+        );
+        onUpdateCryptoWallet(updatedWallet);
         
         updatedNodes = updatedNodes.map(node => {
           if (node.id === targetNode.id) {

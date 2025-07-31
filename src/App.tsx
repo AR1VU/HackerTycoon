@@ -11,12 +11,15 @@ import { NetworkNode } from './types/network';
 import { DownloadedFile } from './types/filesystem';
 import { HackingTool } from './types/tools';
 import { SkillNode, SkillTreeState } from './types/skills';
+import { CryptoWallet, CryptoMarket } from './types/crypto';
 import { generateNetworkGrid } from './utils/networkGenerator';
 import { setCommandContext } from './utils/commandParser';
 import { DEFAULT_TOOLS, unlockTool } from './utils/toolsManager';
 import { DEFAULT_SKILL_TREE, getDefaultPlayerStats, calculatePlayerStats, awardSkillPoints } from './utils/skillTree';
+import { createInitialWallet, createInitialMarket, startMarketUpdates } from './utils/cryptoManager';
 import { saveGameState, loadGameState, resetGameState, hasExistingGameState } from './utils/storageManager';
 import SkillTreePanel from './components/SkillTreePanel';
+import CryptoWalletPanel from './components/CryptoWalletPanel';
 
 function App() {
   // Initialize state from localStorage or defaults
@@ -83,6 +86,24 @@ function App() {
     const skillBonuses = calculatePlayerStats(skillTree.nodes);
     return { ...baseStats, ...skillBonuses };
   });
+  
+  const [cryptoWallet, setCryptoWallet] = useState<CryptoWallet>(() => {
+    if (hasExistingGameState()) {
+      const savedState = loadGameState();
+      return savedState.cryptoWallet || createInitialWallet();
+    }
+    return createInitialWallet();
+  });
+  
+  const [cryptoMarket, setCryptoMarket] = useState<CryptoMarket>(() => {
+    if (hasExistingGameState()) {
+      const savedState = loadGameState();
+      return savedState.cryptoMarket || createInitialMarket();
+    }
+    return createInitialMarket();
+  });
+  
+  const [isCryptoWalletOpen, setIsCryptoWalletOpen] = useState(false);
 
   // Handle scanning - update node statuses
 
@@ -160,6 +181,11 @@ function App() {
   const handleShowSkillTree = useCallback(() => {
     setIsSkillTreeOpen(true);
   }, []);
+  
+  // Handle showing crypto wallet panel
+  const handleShowCryptoWallet = useCallback(() => {
+    setIsCryptoWalletOpen(true);
+  }, []);
 
   // Handle updating tools
   const handleUpdateTools = useCallback((updatedTools: HackingTool[]) => {
@@ -212,6 +238,20 @@ function App() {
     // Save to localStorage
     saveGameState({ skillTree: newSkillTree });
   }, [skillTree, playerStats.hacksCompleted]);
+  
+  // Handle crypto wallet updates
+  const handleUpdateCryptoWallet = useCallback((newWallet: CryptoWallet) => {
+    setCryptoWallet(newWallet);
+    // Save to localStorage
+    saveGameState({ cryptoWallet: newWallet });
+  }, []);
+  
+  // Handle crypto market updates
+  const handleUpdateCryptoMarket = useCallback((newMarket: CryptoMarket) => {
+    setCryptoMarket(newMarket);
+    // Save to localStorage
+    saveGameState({ cryptoMarket: newMarket });
+  }, []);
 
   // Handle game reset
   const handleReset = useCallback(() => {
@@ -224,11 +264,15 @@ function App() {
       skillPoints: 0,
       totalPointsEarned: 0
     };
+    const newCryptoWallet = createInitialWallet();
+    const newCryptoMarket = createInitialMarket();
     
     setNetworkNodes(newNetworkNodes);
     setDownloads([]);
     setTools(DEFAULT_TOOLS);
     setSkillTree(newSkillTree);
+    setCryptoWallet(newCryptoWallet);
+    setCryptoMarket(newCryptoMarket);
     setPlayerStats(getDefaultPlayerStats());
     setConnectedNode(null);
     setIsModalOpen(false);
@@ -236,6 +280,7 @@ function App() {
     setIsToolsOpen(false);
     setIsHackHistoryOpen(false);
     setIsSkillTreeOpen(false);
+    setIsCryptoWalletOpen(false);
     setToolProgress(null);
     
     // Save initial state
@@ -244,6 +289,8 @@ function App() {
       downloads: [],
       tools: DEFAULT_TOOLS,
       skillTree: newSkillTree,
+      cryptoWallet: newCryptoWallet,
+      cryptoMarket: newCryptoMarket,
       playerPosition: { x: 5, y: 5 }
     });
   }, []);
@@ -256,6 +303,8 @@ function App() {
       downloads,
       tools,
       skillTree,
+      cryptoWallet,
+      cryptoMarket,
       playerStats,
       onScan: handleScanWithNodes,
       onConnect: handleConnect,
@@ -263,11 +312,19 @@ function App() {
       onShowTools: handleShowTools,
       onShowHackHistory: handleShowHackHistory,
       onShowSkillTree: handleShowSkillTree,
+      onShowCryptoWallet: handleShowCryptoWallet,
       onUpdateTools: handleUpdateTools,
+      onUpdateCryptoWallet: handleUpdateCryptoWallet,
       onToolProgress: handleToolProgress,
       onHackSuccess: handleHackSuccess,
     });
-  }, [networkNodes, playerPosition, downloads, tools, skillTree, playerStats, handleScanWithNodes, handleConnect, handleShowDownloads, handleShowTools, handleShowHackHistory, handleShowSkillTree, handleUpdateTools, handleToolProgress, handleHackSuccess]);
+  }, [networkNodes, playerPosition, downloads, tools, skillTree, cryptoWallet, cryptoMarket, playerStats, handleScanWithNodes, handleConnect, handleShowDownloads, handleShowTools, handleShowHackHistory, handleShowSkillTree, handleShowCryptoWallet, handleUpdateTools, handleUpdateCryptoWallet, handleToolProgress, handleHackSuccess]);
+  
+  // Start market updates
+  React.useEffect(() => {
+    const stopMarketUpdates = startMarketUpdates(handleUpdateCryptoMarket, cryptoMarket);
+    return stopMarketUpdates;
+  }, [handleUpdateCryptoMarket, cryptoMarket]);
 
   return (
     <div className="min-h-screen bg-black bg-gradient-to-br from-gray-900 via-black to-gray-900">
@@ -334,6 +391,14 @@ function App() {
         isOpen={isSkillTreeOpen}
         onClose={() => setIsSkillTreeOpen(false)}
         onUpdateSkillTree={handleUpdateSkillTree}
+      />
+      
+      {/* Crypto Wallet Panel */}
+      <CryptoWalletPanel
+        wallet={cryptoWallet}
+        market={cryptoMarket}
+        isOpen={isCryptoWalletOpen}
+        onClose={() => setIsCryptoWalletOpen(false)}
       />
       
       {/* Reset Button */}

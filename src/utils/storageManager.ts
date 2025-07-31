@@ -1,112 +1,63 @@
-import { NetworkNode } from '../types/network';
-import { HackingTool } from '../types/tools';
-import { DownloadedFile } from '../types/filesystem';
-import { SkillTreeState } from '../types/skills';
-
-const STORAGE_KEYS = {
-  NETWORK_NODES: 'hackerTycoon_networkNodes',
-  TOOLS: 'hackerTycoon_tools',
-  DOWNLOADS: 'hackerTycoon_downloads',
-  PLAYER_POSITION: 'hackerTycoon_playerPosition',
-  GAME_STATE: 'hackerTycoon_gameState'
-};
+// Game state storage management
+const STORAGE_KEY = 'hackingGameState';
 
 export interface GameState {
-  networkNodes: NetworkNode[];
-  tools: HackingTool[];
-  downloads: DownloadedFile[];
-  playerPosition: { x: number; y: number };
-  skillTree?: SkillTreeState;
-  lastSaved: Date;
+  // Add your game state interface properties here
+  // This will need to be updated based on your actual game state structure
+  [key: string]: any;
 }
 
-export const saveGameState = (gameState: Partial<GameState>): void => {
+export function saveGameState(gameState: GameState): void {
   try {
-    const currentState = loadGameState();
-    const updatedState: GameState = {
-      ...currentState,
-      ...gameState,
-      lastSaved: new Date()
-    };
-    
-    localStorage.setItem(STORAGE_KEYS.GAME_STATE, JSON.stringify(updatedState));
+    const serializedState = JSON.stringify(gameState, (key, value) => {
+      // Handle Date objects by converting them to ISO strings
+      if (value instanceof Date) {
+        return { __type: 'Date', value: value.toISOString() };
+      }
+      return value;
+    });
+    localStorage.setItem(STORAGE_KEY, serializedState);
   } catch (error) {
     console.error('Failed to save game state:', error);
   }
-};
+}
 
-export const loadGameState = (): GameState => {
+export function loadGameState(): GameState | null {
   try {
-    const saved = localStorage.getItem(STORAGE_KEYS.GAME_STATE);
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      // Convert date strings back to Date objects
-      if (parsed.lastSaved) {
-        parsed.lastSaved = new Date(parsed.lastSaved);
-      }
-      if (parsed.downloads) {
-        parsed.downloads = parsed.downloads.map((download: any) => ({
-          ...download,
-          downloadedAt: new Date(download.downloadedAt)
-        }));
-      }
-      if (parsed.networkNodes) {
-        parsed.networkNodes = parsed.networkNodes.map((node: any) => ({
-          ...node,
-          hackHistory: node.hackHistory?.map((hack: any) => ({
-            ...hack,
-            timestamp: new Date(hack.timestamp)
-          })) || []
-        }));
-      }
-      return parsed;
+    const serializedState = localStorage.getItem(STORAGE_KEY);
+    if (!serializedState) {
+      return null;
     }
+    
+    const gameState = JSON.parse(serializedState, (key, value) => {
+      // Re-hydrate Date objects from ISO strings
+      if (value && typeof value === 'object' && value.__type === 'Date') {
+        return new Date(value.value);
+      }
+      return value;
+    });
+    
+    return gameState;
   } catch (error) {
     console.error('Failed to load game state:', error);
+    return null;
   }
-  
-  return {
-    networkNodes: [],
-    tools: [],
-    downloads: [],
-    playerPosition: { x: 5, y: 5 },
-    lastSaved: new Date()
-  };
-};
+}
 
-export const resetGameState = (): void => {
+export function resetGameState(): void {
   try {
-    localStorage.removeItem(STORAGE_KEYS.GAME_STATE);
-    // Also clear individual keys for backward compatibility
-    Object.values(STORAGE_KEYS).forEach(key => {
-      localStorage.removeItem(key);
-    });
+    localStorage.removeItem(STORAGE_KEY);
   } catch (error) {
     console.error('Failed to reset game state:', error);
   }
-};
+}
 
-export const hasExistingGameState = (): boolean => {
+export function hasExistingGameState(): boolean {
   try {
-    const saved = localStorage.getItem(STORAGE_KEYS.GAME_STATE);
-    return saved !== null;
+    const serializedState = localStorage.getItem(STORAGE_KEY);
+    return serializedState !== null && serializedState.trim() !== '';
   } catch (error) {
+    console.error('Failed to check for existing game state:', error);
     return false;
   }
-};
-
-export const exportGameState = (): string => {
-  const gameState = loadGameState();
-  return JSON.stringify(gameState, null, 2);
-};
-
-export const importGameState = (jsonString: string): boolean => {
-  try {
-    const gameState = JSON.parse(jsonString);
-    localStorage.setItem(STORAGE_KEYS.GAME_STATE, jsonString);
-    return true;
-  } catch (error) {
-    console.error('Failed to import game state:', error);
-    return false;
-  }
-};
+}
