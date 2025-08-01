@@ -83,7 +83,7 @@ const getCommands = (): Record<string, Command> => ({
       '  bypass [ip] [firewall] - Bypass firewall protection',
       '',
       '🕸️  DARK WEB & UNDERGROUND:',
-      '  market open    - Access the underground black market',
+      '  blackmarket    - Access the underground black market',
       '  inventory      - View owned items and equipment',
       '  wallet         - View ɄCoin wallet and balance',
       '  market         - View current ɄCoin exchange rate',
@@ -360,8 +360,8 @@ const getCommands = (): Record<string, Command> => ({
       ];
     },
   },
-  'market open': {
-    name: 'market open',
+  blackmarket: {
+    name: 'blackmarket',
     description: 'Access the underground black market',
     execute: () => {
       if (!commandContext) {
