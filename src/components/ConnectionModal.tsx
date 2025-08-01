@@ -28,6 +28,11 @@ const ConnectionModal: React.FC<ConnectionModalProps> = ({ node, isOpen, onClose
   const handleCloseTerminal = () => {
     setShowTerminal(false);
   };
+  
+  const handleDownloadWrapper = (file: DownloadedFile) => {
+    onDownload(file);
+    // This will be handled by the parent component's mission progress tracking
+  };
 
   return (
     <>
@@ -119,7 +124,7 @@ const ConnectionModal: React.FC<ConnectionModalProps> = ({ node, isOpen, onClose
         node={node}
         isOpen={showTerminal}
         onClose={handleCloseTerminal}
-        onDownload={onDownload}
+        onDownload={handleDownloadWrapper}
       />
     </>
   );

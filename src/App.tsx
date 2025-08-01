@@ -12,14 +12,17 @@ import { DownloadedFile } from './types/filesystem';
 import { HackingTool } from './types/tools';
 import { SkillNode, SkillTreeState } from './types/skills';
 import { CryptoWallet, CryptoMarket } from './types/crypto';
+import { MissionState } from './types/missions';
 import { generateNetworkGrid } from './utils/networkGenerator';
 import { setCommandContext } from './utils/commandParser';
 import { DEFAULT_TOOLS, unlockTool } from './utils/toolsManager';
 import { DEFAULT_SKILL_TREE, getDefaultPlayerStats, calculatePlayerStats, awardSkillPoints } from './utils/skillTree';
 import { createInitialWallet, createInitialMarket, startMarketUpdates } from './utils/cryptoManager';
+import { createInitialMissionState, acceptMission, updateMissionProgress, checkExpiredMissions } from './utils/missionManager';
 import { saveGameState, loadGameState, resetGameState, hasExistingGameState } from './utils/storageManager';
 import SkillTreePanel from './components/SkillTreePanel';
 import CryptoWalletPanel from './components/CryptoWalletPanel';
+import MissionsPanel from './components/MissionsPanel';
 
 function App() {
   // Initialize state from localStorage or defaults
@@ -104,6 +107,16 @@ function App() {
   });
   
   const [isCryptoWalletOpen, setIsCryptoWalletOpen] = useState(false);
+  
+  const [missionState, setMissionState] = useState<MissionState>(() => {
+    if (hasExistingGameState()) {
+      const savedState = loadGameState();
+      return savedState.missionState || createInitialMissionState();
+    }
+    return createInitialMissionState();
+  });
+  
+  const [isMissionsOpen, setIsMissionsOpen] = useState(false);
 
   // Handle scanning - update node statuses
 
@@ -152,15 +165,32 @@ function App() {
     handleConnect(node);
   }, [handleConnect]);
 
+  // Handle mission progress updates
+  const handleMissionProgress = useCallback((
+    eventType: 'hack_success' | 'file_download' | 'tool_use' | 'crypto_earn',
+    eventData: any
+  ) => {
+    const updatedMissionState = updateMissionProgress(missionState, eventType, eventData);
+    if (updatedMissionState !== missionState) {
+      setMissionState(updatedMissionState);
+      // Save to localStorage
+      saveGameState({ missionState: updatedMissionState });
+    }
+  }, [missionState]);
+
   // Handle file downloads
   const handleDownload = useCallback((file: DownloadedFile) => {
     setDownloads(prev => {
       const updatedDownloads = [...prev, file];
       // Save to localStorage
       saveGameState({ downloads: updatedDownloads });
+      
+      // Update mission progress for file downloads
+      handleMissionProgress('file_download', { fileName: file.name });
+      
       return updatedDownloads;
     });
-  }, []);
+  }, [handleMissionProgress]);
 
   // Handle showing downloads panel
   const handleShowDownloads = useCallback(() => {
@@ -185,6 +215,11 @@ function App() {
   // Handle showing crypto wallet panel
   const handleShowCryptoWallet = useCallback(() => {
     setIsCryptoWalletOpen(true);
+  }, []);
+  
+  // Handle showing missions panel
+  const handleShowMissions = useCallback(() => {
+    setIsMissionsOpen(true);
   }, []);
 
   // Handle updating tools
@@ -252,6 +287,14 @@ function App() {
     // Save to localStorage
     saveGameState({ cryptoMarket: newMarket });
   }, []);
+  
+  // Handle mission acceptance
+  const handleAcceptMission = useCallback((missionId: string) => {
+    const newMissionState = acceptMission(missionId, missionState);
+    setMissionState(newMissionState);
+    // Save to localStorage
+    saveGameState({ missionState: newMissionState });
+  }, [missionState]);
 
   // Handle game reset
   const handleReset = useCallback(() => {
@@ -266,6 +309,7 @@ function App() {
     };
     const newCryptoWallet = createInitialWallet();
     const newCryptoMarket = createInitialMarket();
+    const newMissionState = createInitialMissionState();
     
     setNetworkNodes(newNetworkNodes);
     setDownloads([]);
@@ -273,6 +317,7 @@ function App() {
     setSkillTree(newSkillTree);
     setCryptoWallet(newCryptoWallet);
     setCryptoMarket(newCryptoMarket);
+    setMissionState(newMissionState);
     setPlayerStats(getDefaultPlayerStats());
     setConnectedNode(null);
     setIsModalOpen(false);
@@ -281,6 +326,7 @@ function App() {
     setIsHackHistoryOpen(false);
     setIsSkillTreeOpen(false);
     setIsCryptoWalletOpen(false);
+    setIsMissionsOpen(false);
     setToolProgress(null);
     
     // Save initial state
@@ -291,6 +337,7 @@ function App() {
       skillTree: newSkillTree,
       cryptoWallet: newCryptoWallet,
       cryptoMarket: newCryptoMarket,
+      missionState: newMissionState,
       playerPosition: { x: 5, y: 5 }
     });
   }, []);
@@ -313,18 +360,33 @@ function App() {
       onShowHackHistory: handleShowHackHistory,
       onShowSkillTree: handleShowSkillTree,
       onShowCryptoWallet: handleShowCryptoWallet,
+      onShowMissions: handleShowMissions,
       onUpdateTools: handleUpdateTools,
       onUpdateCryptoWallet: handleUpdateCryptoWallet,
       onToolProgress: handleToolProgress,
       onHackSuccess: handleHackSuccess,
+      onMissionProgress: handleMissionProgress,
     });
-  }, [networkNodes, playerPosition, downloads, tools, skillTree, cryptoWallet, cryptoMarket, playerStats, handleScanWithNodes, handleConnect, handleShowDownloads, handleShowTools, handleShowHackHistory, handleShowSkillTree, handleShowCryptoWallet, handleUpdateTools, handleUpdateCryptoWallet, handleToolProgress, handleHackSuccess]);
+  }, [networkNodes, playerPosition, downloads, tools, skillTree, cryptoWallet, cryptoMarket, playerStats, missionState, handleScanWithNodes, handleConnect, handleShowDownloads, handleShowTools, handleShowHackHistory, handleShowSkillTree, handleShowCryptoWallet, handleShowMissions, handleUpdateTools, handleUpdateCryptoWallet, handleToolProgress, handleHackSuccess, handleMissionProgress]);
   
   // Start market updates
   React.useEffect(() => {
     const stopMarketUpdates = startMarketUpdates(handleUpdateCryptoMarket, cryptoMarket);
     return stopMarketUpdates;
   }, [handleUpdateCryptoMarket, cryptoMarket]);
+  
+  // Check for expired missions periodically
+  React.useEffect(() => {
+    const interval = setInterval(() => {
+      const updatedMissionState = checkExpiredMissions(missionState);
+      if (updatedMissionState !== missionState) {
+        setMissionState(updatedMissionState);
+        saveGameState({ missionState: updatedMissionState });
+      }
+    }, 60000); // Check every minute
+    
+    return () => clearInterval(interval);
+  }, [missionState]);
 
   return (
     <div className="min-h-screen bg-black bg-gradient-to-br from-gray-900 via-black to-gray-900">
@@ -399,6 +461,14 @@ function App() {
         market={cryptoMarket}
         isOpen={isCryptoWalletOpen}
         onClose={() => setIsCryptoWalletOpen(false)}
+      />
+      
+      {/* Missions Panel */}
+      <MissionsPanel
+        missionState={missionState}
+        isOpen={isMissionsOpen}
+        onClose={() => setIsMissionsOpen(false)}
+        onAcceptMission={handleAcceptMission}
       />
       
       {/* Reset Button */}

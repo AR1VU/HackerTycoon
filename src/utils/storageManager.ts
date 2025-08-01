@@ -1,10 +1,17 @@
 // Game state storage management
+import { MissionState } from '../types/missions';
+
 const STORAGE_KEY = 'hackingGameState';
 
 export interface GameState {
-  // Add your game state interface properties here
-  // This will need to be updated based on your actual game state structure
-  [key: string]: any;
+  networkNodes?: any[];
+  downloads?: any[];
+  tools?: any[];
+  skillTree?: any;
+  cryptoWallet?: any;
+  cryptoMarket?: any;
+  missionState?: MissionState;
+  playerPosition?: { x: number; y: number };
 }
 
 export function saveGameState(gameState: GameState): void {

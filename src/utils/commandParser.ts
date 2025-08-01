@@ -4,6 +4,7 @@ import { DownloadedFile } from '../types/filesystem';
 import { HackingTool, ToolResult } from '../types/tools';
 import { SkillTreeState, PlayerStats } from '../types/skills';
 import { CryptoWallet, CryptoMarket } from '../types/crypto';
+import { MissionState } from '../types/missions';
 import { getNodesInRadius } from './networkGenerator';
 import { 
   checkToolCooldown, 
@@ -27,6 +28,7 @@ interface CommandContext {
   skillTree: SkillTreeState;
   cryptoWallet: CryptoWallet;
   cryptoMarket: CryptoMarket;
+  missionState: MissionState;
   playerStats: PlayerStats;
   onScan: (scannedNodes: NetworkNode[]) => void;
   onConnect: (node: NetworkNode) => void;
@@ -34,11 +36,13 @@ interface CommandContext {
   onShowTools: () => void;
   onShowHackHistory: () => void;
   onShowCryptoWallet: () => void;
+  onShowMissions: () => void;
   onUpdateTools: (tools: HackingTool[]) => void;
   onUpdateCryptoWallet: (wallet: CryptoWallet) => void;
   onToolProgress: (progress: number, message: string) => void;
   onShowSkillTree: () => void;
   onHackSuccess: () => void;
+  onMissionProgress: (eventType: 'hack_success' | 'file_download' | 'tool_use' | 'crypto_earn', eventData: any) => void;
 }
 
 let commandContext: CommandContext | null = null;
@@ -79,6 +83,8 @@ const getCommands = (): Record<string, Command> => ({
       '  skills         - View and manage skill tree',
       '  wallet         - View ɄCoin wallet and balance',
       '  market         - View current ɄCoin exchange rate',
+      '  contracts      - View available missions and contracts',
+      '  missions       - View active and completed missions',
       '',
       'Welcome to Hacker Tycoon v1.0',
       'Type commands to interact with the system.',
@@ -376,6 +382,50 @@ const getCommands = (): Record<string, Command> => ({
       ];
     },
   },
+  contracts: {
+    name: 'contracts',
+    description: 'View available missions and contracts',
+    execute: () => {
+      if (!commandContext) {
+        return ['Error: Mission system not initialized'];
+      }
+      
+      const { missionState, onShowMissions } = commandContext;
+      onShowMissions();
+      
+      const available = missionState.availableMissions.length;
+      const active = missionState.activeMissions.length;
+      
+      return [
+        'Opening mission control panel...',
+        `Available contracts: ${available}`,
+        `Active missions: ${active}`,
+        'Mission panel opened.',
+      ];
+    },
+  },
+  missions: {
+    name: 'missions',
+    description: 'View active and completed missions',
+    execute: () => {
+      if (!commandContext) {
+        return ['Error: Mission system not initialized'];
+      }
+      
+      const { missionState, onShowMissions } = commandContext;
+      onShowMissions();
+      
+      const active = missionState.activeMissions.length;
+      const completed = missionState.completedMissions.length;
+      
+      return [
+        'Opening mission control panel...',
+        `Active missions: ${active}`,
+        `Completed missions: ${completed}`,
+        'Mission panel opened.',
+      ];
+    },
+  },
   bruteforce: {
     name: 'bruteforce',
     description: 'Brute force attack on target system',
@@ -403,7 +453,7 @@ const executeHackingTool = (toolId: string, args: string[]): string[] => {
     return ['Error: Tools system not initialized'];
   }
   
-  const { tools, networkNodes, playerStats, cryptoWallet, onUpdateTools, onUpdateCryptoWallet, onToolProgress, onScan, onHackSuccess } = commandContext;
+  const { tools, networkNodes, playerStats, cryptoWallet, onUpdateTools, onUpdateCryptoWallet, onToolProgress, onScan, onHackSuccess, onMissionProgress } = commandContext;
   
   // Find the tool
   const tool = tools.find(t => t.id === toolId);
@@ -525,6 +575,14 @@ const executeHackingTool = (toolId: string, args: string[]): string[] => {
           `Successful ${tool.name} on ${targetIp} (${targetNode.vulnerability} risk)`
         );
         onUpdateCryptoWallet(updatedWallet);
+        
+        // Update mission progress
+        onMissionProgress('hack_success', { 
+          vulnerability: targetNode.vulnerability,
+          toolId: toolId
+        });
+        onMissionProgress('tool_use', { toolId: toolId });
+        onMissionProgress('crypto_earn', { amount: reward });
         
         updatedNodes = updatedNodes.map(node => {
           if (node.id === targetNode.id) {
