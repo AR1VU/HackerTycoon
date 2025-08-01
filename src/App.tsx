@@ -13,23 +13,26 @@ import { HackingTool } from './types/tools';
 import { SkillNode, SkillTreeState } from './types/skills';
 import { CryptoWallet, CryptoMarket } from './types/crypto';
 import { MissionState } from './types/missions';
+import { BlackMarketState, PlayerInventory } from './types/inventory';
 import { generateNetworkGrid } from './utils/networkGenerator';
 import { setCommandContext } from './utils/commandParser';
 import { DEFAULT_TOOLS, unlockTool } from './utils/toolsManager';
 import { DEFAULT_SKILL_TREE, getDefaultPlayerStats, calculatePlayerStats, awardSkillPoints } from './utils/skillTree';
 import { createInitialWallet, createInitialMarket, startMarketUpdates } from './utils/cryptoManager';
-import { createInitialMissionState, acceptMission, updateMissionProgress, checkExpiredMissions } from './utils/missionManager';
+import { createInitialMissionState, acceptMission, updateMissionProgress, checkExpiredMissions, completeMission } from './utils/missionManager';
+import { createInitialBlackMarket, createInitialInventory, purchaseItem, getItemEffects } from './utils/blackMarket';
 import { saveGameState, loadGameState, resetGameState, hasExistingGameState } from './utils/storageManager';
 import SkillTreePanel from './components/SkillTreePanel';
 import CryptoWalletPanel from './components/CryptoWalletPanel';
 import MissionsPanel from './components/MissionsPanel';
-
+import BlackMarketPanel from './components/BlackMarketPanel';
+import InventoryPanel from './components/InventoryPanel';
 function App() {
   // Initialize state from localStorage or defaults
   const [networkNodes, setNetworkNodes] = useState<NetworkNode[]>(() => {
     if (hasExistingGameState()) {
       const savedState = loadGameState();
-      return savedState.networkNodes.length > 0 ? savedState.networkNodes : generateNetworkGrid();
+      return savedState.networkNodes?.length > 0 ? savedState.networkNodes : generateNetworkGrid();
     }
     return generateNetworkGrid();
   });
@@ -37,7 +40,7 @@ function App() {
   const [playerPosition] = useState(() => {
     if (hasExistingGameState()) {
       const savedState = loadGameState();
-      return savedState.playerPosition;
+      return savedState.playerPosition || { x: 5, y: 5 };
     }
     return { x: 5, y: 5 }; // Center of 10x10 grid
   });
@@ -58,7 +61,7 @@ function App() {
   const [tools, setTools] = useState<HackingTool[]>(() => {
     if (hasExistingGameState()) {
       const savedState = loadGameState();
-      return savedState.tools.length > 0 ? savedState.tools : DEFAULT_TOOLS;
+      return savedState.tools?.length > 0 ? savedState.tools : DEFAULT_TOOLS;
     }
     return DEFAULT_TOOLS;
   });
@@ -117,6 +120,25 @@ function App() {
   });
   
   const [isMissionsOpen, setIsMissionsOpen] = useState(false);
+  
+  const [blackMarket, setBlackMarket] = useState<BlackMarketState>(() => {
+    if (hasExistingGameState()) {
+      const savedState = loadGameState();
+      return savedState.blackMarket || createInitialBlackMarket();
+    }
+    return createInitialBlackMarket();
+  });
+  
+  const [playerInventory, setPlayerInventory] = useState<PlayerInventory>(() => {
+    if (hasExistingGameState()) {
+      const savedState = loadGameState();
+      return savedState.playerInventory || createInitialInventory();
+    }
+    return createInitialInventory();
+  });
+  
+  const [isBlackMarketOpen, setIsBlackMarketOpen] = useState(false);
+  const [isInventoryOpen, setIsInventoryOpen] = useState(false);
 
   // Handle scanning - update node statuses
 
@@ -221,6 +243,16 @@ function App() {
   const handleShowMissions = useCallback(() => {
     setIsMissionsOpen(true);
   }, []);
+  
+  // Handle showing black market panel
+  const handleShowBlackMarket = useCallback(() => {
+    setIsBlackMarketOpen(true);
+  }, []);
+  
+  // Handle showing inventory panel
+  const handleShowInventory = useCallback(() => {
+    setIsInventoryOpen(true);
+  }, []);
 
   // Handle updating tools
   const handleUpdateTools = useCallback((updatedTools: HackingTool[]) => {
@@ -295,6 +327,73 @@ function App() {
     // Save to localStorage
     saveGameState({ missionState: newMissionState });
   }, [missionState]);
+  
+  // Handle mission completion
+  const handleCompleteMission = useCallback((missionId: string) => {
+    const result = completeMission(missionId, missionState);
+    if (result.success && result.mission) {
+      setMissionState(result.updatedMissionState);
+      
+      // Award ɄCoins and skill points
+      const updatedWallet = addTransaction(
+        cryptoWallet,
+        'earned',
+        result.mission.reward,
+        `Mission completed: ${result.mission.name}`
+      );
+      setCryptoWallet(updatedWallet);
+      
+      const newSkillPoints = skillTree.skillPoints + result.mission.skillPointReward;
+      const newSkillTree = {
+        ...skillTree,
+        skillPoints: newSkillPoints,
+        totalPointsEarned: skillTree.totalPointsEarned + result.mission.skillPointReward
+      };
+      setSkillTree(newSkillTree);
+      
+      // Save to localStorage
+      saveGameState({ 
+        missionState: result.updatedMissionState,
+        cryptoWallet: updatedWallet,
+        skillTree: newSkillTree
+      });
+    }
+  }, [missionState, cryptoWallet, skillTree]);
+  
+  // Handle black market purchases
+  const handlePurchaseItem = useCallback((itemId: string) => {
+    const result = purchaseItem(itemId, blackMarket.items, playerInventory, cryptoWallet.balance);
+    
+    if (result.success) {
+      // Update black market
+      setBlackMarket(prev => ({
+        ...prev,
+        items: result.updatedMarket
+      }));
+      
+      // Update inventory
+      setPlayerInventory(result.updatedInventory);
+      
+      // Deduct ɄCoins
+      const item = blackMarket.items.find(i => i.id === itemId);
+      if (item) {
+        const updatedWallet = addTransaction(
+          cryptoWallet,
+          'spent',
+          item.price,
+          `Purchased: ${item.name}`
+        );
+        setCryptoWallet(updatedWallet);
+        
+        // Save to localStorage
+        saveGameState({ 
+          blackMarket: { ...blackMarket, items: result.updatedMarket },
+          playerInventory: result.updatedInventory,
+          cryptoWallet: updatedWallet
+        });
+      }
+    }
+  }, [blackMarket, playerInventory, cryptoWallet]);
 
   // Handle game reset
   const handleReset = useCallback(() => {
@@ -310,6 +409,8 @@ function App() {
     const newCryptoWallet = createInitialWallet();
     const newCryptoMarket = createInitialMarket();
     const newMissionState = createInitialMissionState();
+    const newBlackMarket = createInitialBlackMarket();
+    const newPlayerInventory = createInitialInventory();
     
     setNetworkNodes(newNetworkNodes);
     setDownloads([]);
@@ -319,6 +420,8 @@ function App() {
     setCryptoMarket(newCryptoMarket);
     setMissionState(newMissionState);
     setPlayerStats(getDefaultPlayerStats());
+    setBlackMarket(newBlackMarket);
+    setPlayerInventory(newPlayerInventory);
     setConnectedNode(null);
     setIsModalOpen(false);
     setIsDownloadsOpen(false);
@@ -328,6 +431,8 @@ function App() {
     setIsCryptoWalletOpen(false);
     setIsMissionsOpen(false);
     setToolProgress(null);
+    setIsBlackMarketOpen(false);
+    setIsInventoryOpen(false);
     
     // Save initial state
     saveGameState({
@@ -338,12 +443,15 @@ function App() {
       cryptoWallet: newCryptoWallet,
       cryptoMarket: newCryptoMarket,
       missionState: newMissionState,
+      blackMarket: newBlackMarket,
+      playerInventory: newPlayerInventory,
       playerPosition: { x: 5, y: 5 }
     });
   }, []);
 
   // Set up command context for terminal
   React.useEffect(() => {
+    const inventoryEffects = getItemEffects(playerInventory);
     setCommandContext({
       networkNodes,
       playerPosition,
@@ -354,6 +462,7 @@ function App() {
       cryptoMarket,
       playerStats,
       onScan: handleScanWithNodes,
+      playerInventory,
       onConnect: handleConnect,
       onShowDownloads: handleShowDownloads,
       onShowTools: handleShowTools,
@@ -361,13 +470,17 @@ function App() {
       onShowSkillTree: handleShowSkillTree,
       onShowCryptoWallet: handleShowCryptoWallet,
       onShowMissions: handleShowMissions,
+      onShowBlackMarket: handleShowBlackMarket,
+      onShowInventory: handleShowInventory,
       onUpdateTools: handleUpdateTools,
       onUpdateCryptoWallet: handleUpdateCryptoWallet,
       onToolProgress: handleToolProgress,
       onHackSuccess: handleHackSuccess,
       onMissionProgress: handleMissionProgress,
+      onCompleteMission: handleCompleteMission,
+      onResetGame: handleReset,
     });
-  }, [networkNodes, playerPosition, downloads, tools, skillTree, cryptoWallet, cryptoMarket, playerStats, missionState, handleScanWithNodes, handleConnect, handleShowDownloads, handleShowTools, handleShowHackHistory, handleShowSkillTree, handleShowCryptoWallet, handleShowMissions, handleUpdateTools, handleUpdateCryptoWallet, handleToolProgress, handleHackSuccess, handleMissionProgress]);
+  }, [networkNodes, playerPosition, downloads, tools, skillTree, cryptoWallet, cryptoMarket, playerStats, missionState, playerInventory, handleScanWithNodes, handleConnect, handleShowDownloads, handleShowTools, handleShowHackHistory, handleShowSkillTree, handleShowCryptoWallet, handleShowMissions, handleShowBlackMarket, handleShowInventory, handleUpdateTools, handleUpdateCryptoWallet, handleToolProgress, handleHackSuccess, handleMissionProgress, handleCompleteMission, handleReset]);
   
   // Start market updates
   React.useEffect(() => {
@@ -471,8 +584,22 @@ function App() {
         onAcceptMission={handleAcceptMission}
       />
       
-      {/* Reset Button */}
-      <ResetButton onReset={handleReset} />
+      {/* Black Market Panel */}
+      <BlackMarketPanel
+        blackMarket={blackMarket}
+        playerInventory={playerInventory}
+        cryptoWallet={cryptoWallet}
+        isOpen={isBlackMarketOpen}
+        onClose={() => setIsBlackMarketOpen(false)}
+        onPurchaseItem={handlePurchaseItem}
+      />
+      
+      {/* Inventory Panel */}
+      <InventoryPanel
+        inventory={playerInventory}
+        isOpen={isInventoryOpen}
+        onClose={() => setIsInventoryOpen(false)}
+      />
       
       {/* Ambient lighting effects */}
       <div className="absolute top-0 left-1/4 w-96 h-96 bg-green-500/10 rounded-full blur-3xl"></div>

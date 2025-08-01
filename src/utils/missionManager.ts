@@ -290,6 +290,50 @@ export const updateMissionProgress = (
   };
 };
 
+export const completeMission = (missionId: string, missionState: MissionState): {
+  success: boolean;
+  updatedMissionState: MissionState;
+  mission: Mission | null;
+} => {
+  const mission = missionState.activeMissions.find(m => m.id === missionId);
+  if (!mission) {
+    return {
+      success: false,
+      updatedMissionState: missionState,
+      mission: null
+    };
+  }
+  
+  const progress = missionState.missionProgress[missionId];
+  const allRequirementsMet = progress && mission.requirements.every((_, index) => progress.requirements[index]);
+  
+  if (!allRequirementsMet) {
+    return {
+      success: false,
+      updatedMissionState: missionState,
+      mission
+    };
+  }
+  
+  const completedMission: Mission = {
+    ...mission,
+    status: 'completed',
+    completedAt: new Date()
+  };
+  
+  const updatedMissionState: MissionState = {
+    ...missionState,
+    activeMissions: missionState.activeMissions.filter(m => m.id !== missionId),
+    completedMissions: [...missionState.completedMissions, completedMission]
+  };
+  
+  return {
+    success: true,
+    updatedMissionState,
+    mission: completedMission
+  };
+};
+
 export const checkExpiredMissions = (missionState: MissionState): MissionState => {
   const now = new Date();
   const updatedActiveMissions: Mission[] = [];

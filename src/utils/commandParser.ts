@@ -30,6 +30,7 @@ interface CommandContext {
   cryptoMarket: CryptoMarket;
   missionState: MissionState;
   playerStats: PlayerStats;
+  playerInventory: any;
   onScan: (scannedNodes: NetworkNode[]) => void;
   onConnect: (node: NetworkNode) => void;
   onShowDownloads: () => void;
@@ -37,12 +38,16 @@ interface CommandContext {
   onShowHackHistory: () => void;
   onShowCryptoWallet: () => void;
   onShowMissions: () => void;
+  onShowBlackMarket: () => void;
+  onShowInventory: () => void;
   onUpdateTools: (tools: HackingTool[]) => void;
   onUpdateCryptoWallet: (wallet: CryptoWallet) => void;
   onToolProgress: (progress: number, message: string) => void;
   onShowSkillTree: () => void;
   onHackSuccess: () => void;
   onMissionProgress: (eventType: 'hack_success' | 'file_download' | 'tool_use' | 'crypto_earn', eventData: any) => void;
+  onCompleteMission: (missionId: string) => void;
+  onResetGame: () => void;
 }
 
 let commandContext: CommandContext | null = null;
@@ -61,6 +66,7 @@ const getCommands = (): Record<string, Command> => ({
       '📋 SYSTEM COMMANDS:',
       '  help           - Display this help message',
       '  clear          - Clear the terminal screen',
+      '  reset          - Reset the entire game (requires confirmation)',
       '  echo [text]    - Print text to the terminal',
       '  whoami         - Display current user information',
       '  date           - Display current date and time',
@@ -76,15 +82,19 @@ const getCommands = (): Record<string, Command> => ({
       '  inject [ip] [script]   - Code injection attack',
       '  bypass [ip] [firewall] - Bypass firewall protection',
       '',
-      '📊 MANAGEMENT PANELS:',
-      '  downloads      - View downloaded files',
-      '  tools          - View available hacking tools',
-      '  history        - View hack history and statistics',
-      '  skills         - View and manage skill tree',
+      '🕸️  DARK WEB & UNDERGROUND:',
+      '  market open    - Access the underground black market',
+      '  inventory      - View owned items and equipment',
       '  wallet         - View ɄCoin wallet and balance',
       '  market         - View current ɄCoin exchange rate',
       '  contracts      - View available missions and contracts',
       '  missions       - View active and completed missions',
+      '',
+      '📊 INFORMATION PANELS:',
+      '  downloads      - View downloaded files',
+      '  tools          - View available hacking tools',
+      '  history        - View hack history and statistics',
+      '  skills         - View and manage skill tree',
       '',
       'Welcome to Hacker Tycoon v1.0',
       'Type commands to interact with the system.',
@@ -94,6 +104,58 @@ const getCommands = (): Record<string, Command> => ({
     name: 'clear',
     description: 'Clear the terminal screen',
     execute: () => [],
+  },
+  reset: {
+    name: 'reset',
+    description: 'Reset the entire game',
+    execute: () => {
+      if (!commandContext) {
+        return ['Error: System not initialized'];
+      }
+      
+      const { onResetGame } = commandContext;
+      
+      return [
+        '⚠️  WARNING: This will permanently delete all game progress!',
+        '',
+        '🗑️  The following will be lost:',
+        '   • All network progress and hack history',
+        '   • Downloaded files and inventory items',
+        '   • ɄCoin wallet and transaction history',
+        '   • Skill tree progress and purchased skills',
+        '   • Mission progress and completed contracts',
+        '   • All black market purchases',
+        '',
+        '❌ This action cannot be undone!',
+        '',
+        'Type "reset confirm" to proceed with game reset.',
+        'Type any other command to cancel.',
+      ];
+    },
+  },
+  'reset confirm': {
+    name: 'reset confirm',
+    description: 'Confirm game reset',
+    execute: () => {
+      if (!commandContext) {
+        return ['Error: System not initialized'];
+      }
+      
+      const { onResetGame } = commandContext;
+      onResetGame();
+      
+      return [
+        '🔄 Resetting game...',
+        '🗑️  Clearing all data...',
+        '🔧 Reinitializing systems...',
+        '',
+        '✅ Game reset complete!',
+        '🎮 Welcome back to Hacker Tycoon!',
+        '',
+        'All progress has been cleared.',
+        'Type "help" to get started again.',
+      ];
+    },
   },
   echo: {
     name: 'echo',
@@ -298,6 +360,49 @@ const getCommands = (): Record<string, Command> => ({
       ];
     },
   },
+  'market open': {
+    name: 'market open',
+    description: 'Access the underground black market',
+    execute: () => {
+      if (!commandContext) {
+        return ['Error: Market system not initialized'];
+      }
+      
+      const { onShowBlackMarket } = commandContext;
+      onShowBlackMarket();
+      
+      return [
+        '🕸️  Connecting to Dark Web Market...',
+        '🔐 Establishing encrypted connection...',
+        '🛒 Market access granted.',
+        '',
+        'Browse underground tools, exploits, and gear.',
+        'All transactions are anonymous and untraceable.',
+      ];
+    },
+  },
+  inventory: {
+    name: 'inventory',
+    description: 'View owned items and equipment',
+    execute: () => {
+      if (!commandContext) {
+        return ['Error: Inventory system not initialized'];
+      }
+      
+      const { playerInventory, onShowInventory } = commandContext;
+      onShowInventory();
+      
+      const itemCount = playerInventory.items.length;
+      const totalValue = formatCurrency(playerInventory.totalValue);
+      
+      return [
+        '📦 Opening inventory...',
+        `Items owned: ${itemCount}`,
+        `Total value: ${totalValue}`,
+        itemCount === 0 ? 'Inventory is empty.' : 'Inventory panel opened.',
+      ];
+    },
+  },
   wallet: {
     name: 'wallet',
     description: 'View ɄCoin wallet and balance',
@@ -391,6 +496,11 @@ const getCommands = (): Record<string, Command> => ({
       }
       
       const { missionState, onShowMissions } = commandContext;
+      
+      if (!missionState) {
+        return ['Error: Mission state not initialized'];
+      }
+      
       onShowMissions();
       
       const available = missionState.availableMissions.length;
@@ -413,6 +523,11 @@ const getCommands = (): Record<string, Command> => ({
       }
       
       const { missionState, onShowMissions } = commandContext;
+      
+      if (!missionState) {
+        return ['Error: Mission state not initialized'];
+      }
+      
       onShowMissions();
       
       const active = missionState.activeMissions.length;
@@ -423,6 +538,85 @@ const getCommands = (): Record<string, Command> => ({
         `Active missions: ${active}`,
         `Completed missions: ${completed}`,
         'Mission panel opened.',
+      ];
+    },
+  },
+  'complete mission': {
+    name: 'complete mission',
+    description: 'Complete an active mission',
+    execute: (args) => {
+      if (!commandContext) {
+        return ['Error: Mission system not initialized'];
+      }
+      
+      const { missionState, onCompleteMission } = commandContext;
+      
+      if (!missionState) {
+        return ['Error: Mission state not initialized'];
+      }
+      
+      if (args.length === 0) {
+        const completableMissions = missionState.activeMissions.filter(mission => {
+          const progress = missionState.missionProgress[mission.id];
+          return progress && mission.requirements.every((_, index) => progress.requirements[index]);
+        });
+        
+        if (completableMissions.length === 0) {
+          return [
+            'No missions ready for completion.',
+            'Complete mission requirements first.',
+            'Use "missions" to view active mission progress.'
+          ];
+        }
+        
+        const output = [
+          'Missions ready for completion:',
+          ''
+        ];
+        
+        completableMissions.forEach(mission => {
+          output.push(`  ${mission.name} - ${formatCurrency(mission.reward)} + ${mission.skillPointReward} SP`);
+        });
+        
+        output.push('');
+        output.push('Usage: complete mission [mission_name]');
+        
+        return output;
+      }
+      
+      const missionName = args.join(' ').toLowerCase();
+      const mission = missionState.activeMissions.find(m => 
+        m.name.toLowerCase().includes(missionName) || m.id === missionName
+      );
+      
+      if (!mission) {
+        return [
+          `Mission "${args.join(' ')}" not found.`,
+          'Use "complete mission" to see available missions.'
+        ];
+      }
+      
+      const progress = missionState.missionProgress[mission.id];
+      const allRequirementsMet = progress && mission.requirements.every((_, index) => progress.requirements[index]);
+      
+      if (!allRequirementsMet) {
+        return [
+          `Mission "${mission.name}" requirements not yet completed.`,
+          'Complete all requirements before claiming rewards.',
+          'Use "missions" to view progress.'
+        ];
+      }
+      
+      onCompleteMission(mission.id);
+      
+      return [
+        `✅ Mission "${mission.name}" completed!`,
+        '',
+        `💰 Reward: ${formatCurrency(mission.reward)}`,
+        `⚡ Skill Points: ${mission.skillPointReward} SP`,
+        '',
+        'Rewards have been added to your account.',
+        'Check "wallet" and "skills" for updated balances.'
       ];
     },
   },
