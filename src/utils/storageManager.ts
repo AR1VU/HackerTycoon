@@ -1,6 +1,7 @@
 // Game state storage management
 import { MissionState } from '../types/missions';
 import { BlackMarketState, PlayerInventory } from '../types/inventory';
+import { TraceState } from '../types/trace';
 
 const STORAGE_KEY = 'hackingGameState';
 
@@ -14,6 +15,7 @@ export interface GameState {
   missionState?: MissionState;
   blackMarket?: BlackMarketState;
   playerInventory?: PlayerInventory;
+  traceState?: TraceState;
   playerPosition?: { x: number; y: number };
 }
 

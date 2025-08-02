@@ -5,6 +5,7 @@ import { HackingTool, ToolResult } from '../types/tools';
 import { SkillTreeState, PlayerStats } from '../types/skills';
 import { CryptoWallet, CryptoMarket } from '../types/crypto';
 import { MissionState } from '../types/missions';
+import { TraceState } from '../types/trace';
 import { getNodesInRadius } from './networkGenerator';
 import { 
   checkToolCooldown, 
@@ -31,6 +32,7 @@ interface CommandContext {
   missionState: MissionState;
   playerStats: PlayerStats;
   playerInventory: any;
+  traceState: TraceState;
   onScan: (scannedNodes: NetworkNode[]) => void;
   onConnect: (node: NetworkNode) => void;
   onShowDownloads: () => void;
@@ -48,7 +50,11 @@ interface CommandContext {
   onMissionProgress: (eventType: 'hack_success' | 'file_download' | 'tool_use' | 'crypto_earn', eventData: any) => void;
   onCompleteMission: (missionId: string) => void;
   onResetGame: () => void;
+  onTraceUpdate: (action: string, details?: string) => void;
+  onProxyCommand: (command: 'on' | 'off') => string;
+  onDeleteLogs: (serverIp: string) => string;
 }
+
 
 let commandContext: CommandContext | null = null;
 
@@ -66,11 +72,11 @@ const getCommands = (): Record<string, Command> => ({
       '📋 SYSTEM COMMANDS:',
       '  help           - Display this help message',
       '  clear          - Clear the terminal screen',
-      '  reset          - Reset the entire game (requires confirmation)',
       '  echo [text]    - Print text to the terminal',
       '  whoami         - Display current user information',
       '  date           - Display current date and time',
       '  system         - Display system information',
+      '  trace          - Display current trace level and status',
       '',
       '🔍 NETWORK COMMANDS:',
       '  scan           - Scan nearby network nodes',
@@ -82,13 +88,9 @@ const getCommands = (): Record<string, Command> => ({
       '  inject [ip] [script]   - Code injection attack',
       '  bypass [ip] [firewall] - Bypass firewall protection',
       '',
-      '🕸️  DARK WEB & UNDERGROUND:',
-      '  blackmarket    - Access the underground black market',
-      '  inventory      - View owned items and equipment',
-      '  wallet         - View ɄCoin wallet and balance',
-      '  market         - View current ɄCoin exchange rate',
-      '  contracts      - View available missions and contracts',
-      '  missions       - View active and completed missions',
+      '🛡️  SECURITY COMMANDS:',
+      '  proxy [on|off]         - Activate/deactivate proxy network',
+      '  logs delete [ip]       - Delete logs from compromised server',
       '',
       '📊 INFORMATION PANELS:',
       '  downloads      - View downloaded files',
@@ -104,58 +106,6 @@ const getCommands = (): Record<string, Command> => ({
     name: 'clear',
     description: 'Clear the terminal screen',
     execute: () => [],
-  },
-  reset: {
-    name: 'reset',
-    description: 'Reset the entire game',
-    execute: () => {
-      if (!commandContext) {
-        return ['Error: System not initialized'];
-      }
-      
-      const { onResetGame } = commandContext;
-      
-      return [
-        '⚠️  WARNING: This will permanently delete all game progress!',
-        '',
-        '🗑️  The following will be lost:',
-        '   • All network progress and hack history',
-        '   • Downloaded files and inventory items',
-        '   • ɄCoin wallet and transaction history',
-        '   • Skill tree progress and purchased skills',
-        '   • Mission progress and completed contracts',
-        '   • All black market purchases',
-        '',
-        '❌ This action cannot be undone!',
-        '',
-        'Type "reset confirm" to proceed with game reset.',
-        'Type any other command to cancel.',
-      ];
-    },
-  },
-  'reset confirm': {
-    name: 'reset confirm',
-    description: 'Confirm game reset',
-    execute: () => {
-      if (!commandContext) {
-        return ['Error: System not initialized'];
-      }
-      
-      const { onResetGame } = commandContext;
-      onResetGame();
-      
-      return [
-        '🔄 Resetting game...',
-        '🗑️  Clearing all data...',
-        '🔧 Reinitializing systems...',
-        '',
-        '✅ Game reset complete!',
-        '🎮 Welcome back to Hacker Tycoon!',
-        '',
-        'All progress has been cleared.',
-        'Type "help" to get started again.',
-      ];
-    },
   },
   echo: {
     name: 'echo',
@@ -184,6 +134,134 @@ const getCommands = (): Record<string, Command> => ({
       'Status: CONNECTED',
     ],
   },
+  trace: {
+    name: 'trace',
+    description: 'Display current trace level and status',
+    execute: () => {
+      if (!commandContext) {
+        return ['Error: Trace system not initialized'];
+      }
+      
+      const { traceState } = commandContext;
+      
+      const output = [
+        '╔══════════════════════════════════════════════════════════════╗',
+        '║                      TRACE STATUS                            ║',
+        '╚══════════════════════════════════════════════════════════════╝',
+        '',
+        `Current Trace Level: ${traceState.level.toFixed(1)}%`,
+        `Proxy Status: ${traceState.isProxyActive ? 'ACTIVE' : 'INACTIVE'}`,
+        `Last Activity: ${new Date(traceState.lastActivity).toLocaleTimeString()}`,
+        ''
+      ];
+      
+      if (traceState.level < 30) {
+        output.push('🟢 Status: SAFE - Low detection risk');
+      } else if (traceState.level < 60) {
+        output.push('🟡 Status: CAUTION - Moderate detection risk');
+      } else if (traceState.level < 90) {
+        output.push('🟠 Status: HIGH RISK - Authorities may be tracking');
+      } else {
+        output.push('🔴 Status: CRITICAL - Immediate danger of detection');
+      }
+      
+      output.push('');
+      output.push('💡 Use "proxy on" to reduce trace accumulation');
+      output.push('💡 Use "logs delete [ip]" to reduce trace level');
+      
+      return output;
+    },
+  },
+  proxy: {
+    name: 'proxy',
+    description: 'Activate or deactivate proxy network',
+    execute: (args) => {
+      if (!commandContext) {
+        return ['Error: Proxy system not initialized'];
+      }
+      
+      if (args.length === 0) {
+        const { traceState } = commandContext;
+        return [
+          'Proxy Network Status:',
+          `Status: ${traceState.isProxyActive ? 'ACTIVE' : 'INACTIVE'}`,
+          `Cost: 50 ɄCoins per minute`,
+          `Effect: Reduces trace accumulation by 60%`,
+          '',
+          'Usage: proxy [on|off]',
+          'Example: proxy on'
+        ];
+      }
+      
+      const command = args[0].toLowerCase();
+      if (command !== 'on' && command !== 'off') {
+        return [
+          'Invalid proxy command.',
+          'Usage: proxy [on|off]',
+          'Example: proxy on'
+        ];
+      }
+      
+      const { onProxyCommand } = commandContext;
+      const result = onProxyCommand(command as 'on' | 'off');
+      
+      return [result];
+    },
+  },
+  logs: {
+    name: 'logs',
+    description: 'Manage server logs',
+    execute: (args) => {
+      if (!commandContext) {
+        return ['Error: Log management system not initialized'];
+      }
+      
+      if (args.length < 2 || args[0] !== 'delete') {
+        return [
+          'Log Management Commands:',
+          '',
+          '  logs delete [ip]  - Delete logs from compromised server',
+          '',
+          'Deleting logs reduces your trace level but requires',
+          'the target server to be compromised (bypassed or hacked).',
+          '',
+          'Example: logs delete 192.168.1.100'
+        ];
+      }
+      
+      const serverIp = args[1];
+      const { networkNodes, onDeleteLogs } = commandContext;
+      
+      // Check if server exists and is compromised
+      const targetNode = networkNodes.find(node => node.ip === serverIp);
+      if (!targetNode) {
+        return [`Error: Server ${serverIp} not found in network`];
+      }
+      
+      if (targetNode.status !== 'Bypassed' && targetNode.status !== 'Hacked') {
+        return [
+          `Error: Cannot delete logs from ${serverIp}`,
+          `Server status: ${targetNode.status}`,
+          'Server must be bypassed or hacked to delete logs.'
+        ];
+      }
+      
+      const result = onDeleteLogs(serverIp);
+      
+      return [
+        `Accessing ${serverIp}...`,
+        'Locating system logs...',
+        'Deleting access records...',
+        'Clearing authentication logs...',
+        'Removing trace evidence...',
+        '',
+        '✓ Log deletion successful',
+        result,
+        '',
+        'Your digital footprint has been reduced.'
+      ];
+    },
+  },
   scan: {
     name: 'scan',
     description: 'Scan nearby network nodes',
@@ -207,6 +285,10 @@ const getCommands = (): Record<string, Command> => ({
       // Mark nodes as scanned
       const scannedNodes = nearbyNodes.map(node => ({ ...node, status: 'Scanned' as const }));
       onScan(scannedNodes);
+      
+      // Update trace level
+      const { onTraceUpdate } = commandContext;
+      onTraceUpdate('scan', `Network scan (${nearbyNodes.length} nodes)`);
       
       const results = [
         'Network scan initiated...',
@@ -271,6 +353,10 @@ const getCommands = (): Record<string, Command> => ({
       
       // Trigger connection
       onConnect(targetNode);
+      
+      // Update trace level
+      const { onTraceUpdate } = commandContext;
+      onTraceUpdate('connect', `Connection to ${targetIp}`);
       
       return [
         `Initiating connection to ${targetIp}...`,
@@ -357,266 +443,6 @@ const getCommands = (): Record<string, Command> => ({
         `Skills Purchased: ${purchased}/${skillTree.nodes.length}`,
         `Skills Available: ${available}`,
         'Skill tree panel opened.',
-      ];
-    },
-  },
-  blackmarket: {
-    name: 'blackmarket',
-    description: 'Access the underground black market',
-    execute: () => {
-      if (!commandContext) {
-        return ['Error: Market system not initialized'];
-      }
-      
-      const { onShowBlackMarket } = commandContext;
-      onShowBlackMarket();
-      
-      return [
-        '🕸️  Connecting to Dark Web Market...',
-        '🔐 Establishing encrypted connection...',
-        '🛒 Market access granted.',
-        '',
-        'Browse underground tools, exploits, and gear.',
-        'All transactions are anonymous and untraceable.',
-      ];
-    },
-  },
-  inventory: {
-    name: 'inventory',
-    description: 'View owned items and equipment',
-    execute: () => {
-      if (!commandContext) {
-        return ['Error: Inventory system not initialized'];
-      }
-      
-      const { playerInventory, onShowInventory } = commandContext;
-      onShowInventory();
-      
-      const itemCount = playerInventory.items.length;
-      const totalValue = formatCurrency(playerInventory.totalValue);
-      
-      return [
-        '📦 Opening inventory...',
-        `Items owned: ${itemCount}`,
-        `Total value: ${totalValue}`,
-        itemCount === 0 ? 'Inventory is empty.' : 'Inventory panel opened.',
-      ];
-    },
-  },
-  wallet: {
-    name: 'wallet',
-    description: 'View ɄCoin wallet and balance',
-    execute: () => {
-      if (!commandContext) {
-        return ['Error: Wallet system not initialized'];
-      }
-      
-      const { cryptoWallet, cryptoMarket, onShowCryptoWallet } = commandContext;
-      onShowCryptoWallet();
-      
-      const usdValue = cryptoWallet.balance * cryptoMarket.currentRate;
-      const recentTransactions = cryptoWallet.transactions.slice(0, 3);
-      
-      const output = [
-        '╔══════════════════════════════════════════════════════════════╗',
-        '║                        ɄCoin WALLET                          ║',
-        '╚══════════════════════════════════════════════════════════════╝',
-        '',
-        `Balance: ${formatCurrency(cryptoWallet.balance)}`,
-        `USD Value: ${formatUSD(usdValue)} (1Ʉ = ${formatUSD(cryptoMarket.currentRate)})`,
-        '',
-        'Recent Transactions:',
-      ];
-      
-      if (recentTransactions.length === 0) {
-        output.push('  No recent transactions');
-      } else {
-        recentTransactions.forEach(tx => {
-          const sign = tx.type === 'spent' ? '-' : '+';
-          const date = tx.timestamp.toLocaleDateString();
-          output.push(`  ${sign}${formatCurrency(tx.amount)} - ${tx.description} (${date})`);
-        });
-      }
-      
-      output.push('');
-      output.push('Wallet panel opened for detailed view.');
-      
-      return output;
-    },
-  },
-  market: {
-    name: 'market',
-    description: 'View current ɄCoin exchange rate',
-    execute: () => {
-      if (!commandContext) {
-        return ['Error: Market system not initialized'];
-      }
-      
-      const { cryptoMarket } = commandContext;
-      
-      // Calculate trend
-      let trendInfo = '';
-      if (cryptoMarket.history.length >= 2) {
-        const current = cryptoMarket.history[0].rate;
-        const previous = cryptoMarket.history[1].rate;
-        const change = ((current - previous) / previous) * 100;
-        
-        if (change > 0.1) {
-          trendInfo = `📈 +${change.toFixed(2)}%`;
-        } else if (change < -0.1) {
-          trendInfo = `📉 ${change.toFixed(2)}%`;
-        } else {
-          trendInfo = '➡️  Stable';
-        }
-      }
-      
-      const lastUpdate = cryptoMarket.lastUpdate.toLocaleTimeString();
-      
-      return [
-        '╔══════════════════════════════════════════════════════════════╗',
-        '║                      ɄCoin MARKET                            ║',
-        '╚══════════════════════════════════════════════════════════════╝',
-        '',
-        `Current Rate: 1Ʉ = ${formatUSD(cryptoMarket.currentRate)}`,
-        `Trend: ${trendInfo}`,
-        `Last Update: ${lastUpdate}`,
-        '',
-        '💡 Market updates automatically every minute',
-        '💰 Earn ɄCoins by successfully hacking targets',
-        '🛒 Use coins to purchase advanced tools and upgrades',
-      ];
-    },
-  },
-  contracts: {
-    name: 'contracts',
-    description: 'View available missions and contracts',
-    execute: () => {
-      if (!commandContext) {
-        return ['Error: Mission system not initialized'];
-      }
-      
-      const { missionState, onShowMissions } = commandContext;
-      
-      if (!missionState) {
-        return ['Error: Mission state not initialized'];
-      }
-      
-      onShowMissions();
-      
-      const available = missionState.availableMissions.length;
-      const active = missionState.activeMissions.length;
-      
-      return [
-        'Opening mission control panel...',
-        `Available contracts: ${available}`,
-        `Active missions: ${active}`,
-        'Mission panel opened.',
-      ];
-    },
-  },
-  missions: {
-    name: 'missions',
-    description: 'View active and completed missions',
-    execute: () => {
-      if (!commandContext) {
-        return ['Error: Mission system not initialized'];
-      }
-      
-      const { missionState, onShowMissions } = commandContext;
-      
-      if (!missionState) {
-        return ['Error: Mission state not initialized'];
-      }
-      
-      onShowMissions();
-      
-      const active = missionState.activeMissions.length;
-      const completed = missionState.completedMissions.length;
-      
-      return [
-        'Opening mission control panel...',
-        `Active missions: ${active}`,
-        `Completed missions: ${completed}`,
-        'Mission panel opened.',
-      ];
-    },
-  },
-  'complete mission': {
-    name: 'complete mission',
-    description: 'Complete an active mission',
-    execute: (args) => {
-      if (!commandContext) {
-        return ['Error: Mission system not initialized'];
-      }
-      
-      const { missionState, onCompleteMission } = commandContext;
-      
-      if (!missionState) {
-        return ['Error: Mission state not initialized'];
-      }
-      
-      if (args.length === 0) {
-        const completableMissions = missionState.activeMissions.filter(mission => {
-          const progress = missionState.missionProgress[mission.id];
-          return progress && mission.requirements.every((_, index) => progress.requirements[index]);
-        });
-        
-        if (completableMissions.length === 0) {
-          return [
-            'No missions ready for completion.',
-            'Complete mission requirements first.',
-            'Use "missions" to view active mission progress.'
-          ];
-        }
-        
-        const output = [
-          'Missions ready for completion:',
-          ''
-        ];
-        
-        completableMissions.forEach(mission => {
-          output.push(`  ${mission.name} - ${formatCurrency(mission.reward)} + ${mission.skillPointReward} SP`);
-        });
-        
-        output.push('');
-        output.push('Usage: complete mission [mission_name]');
-        
-        return output;
-      }
-      
-      const missionName = args.join(' ').toLowerCase();
-      const mission = missionState.activeMissions.find(m => 
-        m.name.toLowerCase().includes(missionName) || m.id === missionName
-      );
-      
-      if (!mission) {
-        return [
-          `Mission "${args.join(' ')}" not found.`,
-          'Use "complete mission" to see available missions.'
-        ];
-      }
-      
-      const progress = missionState.missionProgress[mission.id];
-      const allRequirementsMet = progress && mission.requirements.every((_, index) => progress.requirements[index]);
-      
-      if (!allRequirementsMet) {
-        return [
-          `Mission "${mission.name}" requirements not yet completed.`,
-          'Complete all requirements before claiming rewards.',
-          'Use "missions" to view progress.'
-        ];
-      }
-      
-      onCompleteMission(mission.id);
-      
-      return [
-        `✅ Mission "${mission.name}" completed!`,
-        '',
-        `💰 Reward: ${formatCurrency(mission.reward)}`,
-        `⚡ Skill Points: ${mission.skillPointReward} SP`,
-        '',
-        'Rewards have been added to your account.',
-        'Check "wallet" and "skills" for updated balances.'
       ];
     },
   },
@@ -741,6 +567,10 @@ const executeHackingTool = (toolId: string, args: string[]): string[] => {
   const updatedTools = updateToolLastUsed(toolId, tools);
   onUpdateTools(updatedTools);
   
+  // Update trace level
+  const { onTraceUpdate } = commandContext;
+  onTraceUpdate(toolId, `${tool.name} attack on ${targetIp}`);
+  
   // Start tool execution
   const additionalArgs = args.slice(1);
   
@@ -830,6 +660,21 @@ const getToolExample = (toolId: string): string => {
 };
 
 export const parseCommand = (input: string): CommandResult => {
+  // Check if game is over due to trace
+  if (commandContext && commandContext.traceState.gameOver) {
+    return {
+      command: input,
+      output: [
+        '🚨 SYSTEM LOCKED DOWN 🚨',
+        '',
+        'Your location has been compromised.',
+        'All network access has been terminated.',
+        'Use the reset button to start a new operation.'
+      ],
+      timestamp: new Date(),
+    };
+  }
+  
   const trimmedInput = input.trim();
   const [commandName, ...args] = trimmedInput.split(' ');
   

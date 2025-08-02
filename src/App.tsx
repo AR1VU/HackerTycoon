@@ -1,11 +1,17 @@
 import React from 'react';
 import { useState, useCallback } from 'react';
-import Terminal from './components/Terminal';
-import NetworkMap from './components/NetworkMap';
-import ConnectionModal from './components/ConnectionModal';
-import DownloadsPanel from './components/DownloadsPanel';
+import Navbar from './components/Navbar';
+import TerminalPage from './pages/TerminalPage';
+import MissionsPage from './pages/MissionsPage';
+import WalletPage from './pages/WalletPage';
+import DarkWebPage from './pages/DarkWebPage';
 import ToolsPanel from './components/ToolsPanel';
+import DownloadsPanel from './components/DownloadsPanel';
 import HackHistoryPanel from './components/HackHistoryPanel';
+import SkillTreePanel from './components/SkillTreePanel';
+import InventoryPanel from './components/InventoryPanel';
+import TraceIndicator from './components/TraceIndicator';
+import GameOverModal from './components/GameOverModal';
 import ResetButton from './components/ResetButton';
 import { NetworkNode } from './types/network';
 import { DownloadedFile } from './types/filesystem';
@@ -14,6 +20,7 @@ import { SkillNode, SkillTreeState } from './types/skills';
 import { CryptoWallet, CryptoMarket } from './types/crypto';
 import { MissionState } from './types/missions';
 import { BlackMarketState, PlayerInventory } from './types/inventory';
+import { TraceState } from './types/trace';
 import { generateNetworkGrid } from './utils/networkGenerator';
 import { setCommandContext } from './utils/commandParser';
 import { DEFAULT_TOOLS, unlockTool } from './utils/toolsManager';
@@ -22,12 +29,20 @@ import { createInitialWallet, createInitialMarket, startMarketUpdates } from './
 import { createInitialMissionState, acceptMission, updateMissionProgress, checkExpiredMissions, completeMission } from './utils/missionManager';
 import { createInitialBlackMarket, createInitialInventory, purchaseItem, getItemEffects } from './utils/blackMarket';
 import { saveGameState, loadGameState, resetGameState, hasExistingGameState } from './utils/storageManager';
-import SkillTreePanel from './components/SkillTreePanel';
-import CryptoWalletPanel from './components/CryptoWalletPanel';
-import MissionsPanel from './components/MissionsPanel';
-import BlackMarketPanel from './components/BlackMarketPanel';
-import InventoryPanel from './components/InventoryPanel';
+import { 
+  createInitialTraceState, 
+  addTraceLevel, 
+  activateProxy, 
+  deactivateProxy, 
+  deleteServerLogs, 
+  updateTraceDecay, 
+  resetTrace,
+  getTraceIncreaseForAction 
+} from './utils/traceManager';
+
 function App() {
+  const [currentPage, setCurrentPage] = useState('terminal');
+  
   // Initialize state from localStorage or defaults
   const [networkNodes, setNetworkNodes] = useState<NetworkNode[]>(() => {
     if (hasExistingGameState()) {
@@ -139,6 +154,14 @@ function App() {
   
   const [isBlackMarketOpen, setIsBlackMarketOpen] = useState(false);
   const [isInventoryOpen, setIsInventoryOpen] = useState(false);
+
+  const [traceState, setTraceState] = useState<TraceState>(() => {
+    if (hasExistingGameState()) {
+      const savedState = loadGameState();
+      return savedState.traceState || createInitialTraceState();
+    }
+    return createInitialTraceState();
+  });
 
   // Handle scanning - update node statuses
 
@@ -292,6 +315,9 @@ function App() {
   
   // Handle successful hack completion (award skill points)
   const handleHackSuccess = useCallback(() => {
+    // Check if game is over due to trace
+    if (traceState.gameOver) return;
+    
     const newSkillPoints = awardSkillPoints(skillTree.skillPoints, playerStats.hacksCompleted + 1);
     const newSkillTree = {
       ...skillTree,
@@ -304,7 +330,7 @@ function App() {
     
     // Save to localStorage
     saveGameState({ skillTree: newSkillTree });
-  }, [skillTree, playerStats.hacksCompleted]);
+  }, [skillTree, playerStats.hacksCompleted, traceState.gameOver]);
   
   // Handle crypto wallet updates
   const handleUpdateCryptoWallet = useCallback((newWallet: CryptoWallet) => {
@@ -397,6 +423,9 @@ function App() {
 
   // Handle game reset
   const handleReset = useCallback(() => {
+    // Reset trace state
+    const newTraceState = resetTrace();
+    
     resetGameState();
     
     // Reset all state to defaults
@@ -412,6 +441,7 @@ function App() {
     const newBlackMarket = createInitialBlackMarket();
     const newPlayerInventory = createInitialInventory();
     
+    setTraceState(newTraceState);
     setNetworkNodes(newNetworkNodes);
     setDownloads([]);
     setTools(DEFAULT_TOOLS);
@@ -436,6 +466,7 @@ function App() {
     
     // Save initial state
     saveGameState({
+      traceState: newTraceState,
       networkNodes: newNetworkNodes,
       downloads: [],
       tools: DEFAULT_TOOLS,
@@ -448,6 +479,49 @@ function App() {
       playerPosition: { x: 5, y: 5 }
     });
   }, []);
+
+  // Handle trace updates
+  const handleTraceUpdate = useCallback((action: string, details?: string) => {
+    if (traceState.gameOver) return;
+    
+    const increase = getTraceIncreaseForAction(action);
+    const reason = details || `${action.charAt(0).toUpperCase() + action.slice(1)} operation`;
+    
+    const updatedTrace = addTraceLevel(traceState, increase, reason);
+    setTraceState(updatedTrace);
+    
+    // Save to localStorage
+    saveGameState({ traceState: updatedTrace });
+  }, [traceState]);
+
+  // Handle proxy commands
+  const handleProxyCommand = useCallback((command: 'on' | 'off') => {
+    if (command === 'on') {
+      const result = activateProxy(traceState, cryptoWallet);
+      if (result.success) {
+        setTraceState(result.updatedTrace);
+        setCryptoWallet(result.updatedWallet);
+        saveGameState({ 
+          traceState: result.updatedTrace,
+          cryptoWallet: result.updatedWallet 
+        });
+      }
+      return result.message;
+    } else {
+      const updatedTrace = deactivateProxy(traceState);
+      setTraceState(updatedTrace);
+      saveGameState({ traceState: updatedTrace });
+      return 'Proxy network deactivated';
+    }
+  }, [traceState, cryptoWallet]);
+
+  // Handle log deletion
+  const handleDeleteLogs = useCallback((serverIp: string) => {
+    const updatedTrace = deleteServerLogs(traceState, serverIp);
+    setTraceState(updatedTrace);
+    saveGameState({ traceState: updatedTrace });
+    return `Logs deleted from ${serverIp}`;
+  }, [traceState]);
 
   // Set up command context for terminal
   React.useEffect(() => {
@@ -479,8 +553,12 @@ function App() {
       onMissionProgress: handleMissionProgress,
       onCompleteMission: handleCompleteMission,
       onResetGame: handleReset,
+      onTraceUpdate: handleTraceUpdate,
+      onProxyCommand: handleProxyCommand,
+      onDeleteLogs: handleDeleteLogs,
+      traceState,
     });
-  }, [networkNodes, playerPosition, downloads, tools, skillTree, cryptoWallet, cryptoMarket, playerStats, missionState, playerInventory, handleScanWithNodes, handleConnect, handleShowDownloads, handleShowTools, handleShowHackHistory, handleShowSkillTree, handleShowCryptoWallet, handleShowMissions, handleShowBlackMarket, handleShowInventory, handleUpdateTools, handleUpdateCryptoWallet, handleToolProgress, handleHackSuccess, handleMissionProgress, handleCompleteMission, handleReset]);
+  }, [networkNodes, playerPosition, downloads, tools, skillTree, cryptoWallet, cryptoMarket, playerStats, missionState, playerInventory, traceState, handleScanWithNodes, handleConnect, handleShowDownloads, handleShowTools, handleShowHackHistory, handleShowSkillTree, handleShowCryptoWallet, handleShowMissions, handleShowBlackMarket, handleShowInventory, handleUpdateTools, handleUpdateCryptoWallet, handleToolProgress, handleHackSuccess, handleMissionProgress, handleCompleteMission, handleReset, handleTraceUpdate, handleProxyCommand, handleDeleteLogs]);
   
   // Start market updates
   React.useEffect(() => {
@@ -501,43 +579,92 @@ function App() {
     return () => clearInterval(interval);
   }, [missionState]);
 
+  // Handle trace decay and proxy costs
+  React.useEffect(() => {
+    const interval = setInterval(() => {
+      const { updatedTrace, updatedWallet } = updateTraceDecay(traceState, cryptoWallet);
+      
+      if (updatedTrace !== traceState) {
+        setTraceState(updatedTrace);
+        saveGameState({ traceState: updatedTrace });
+      }
+      
+      if (updatedWallet !== cryptoWallet) {
+        setCryptoWallet(updatedWallet);
+        saveGameState({ cryptoWallet: updatedWallet });
+      }
+    }, 10000); // Check every 10 seconds
+    
+    return () => clearInterval(interval);
+  }, [traceState, cryptoWallet]);
+
+  const renderCurrentPage = () => {
+    switch (currentPage) {
+      case 'terminal':
+        return (
+          <TerminalPage
+            networkNodes={networkNodes}
+            playerPosition={playerPosition}
+            connectedNode={connectedNode}
+            isModalOpen={isModalOpen}
+            toolProgress={toolProgress}
+            onNodeClick={handleNodeClick}
+            onCloseModal={() => setIsModalOpen(false)}
+            onDownload={handleDownload}
+          />
+        );
+      case 'missions':
+        return (
+          <MissionsPage
+            missionState={missionState}
+            onAcceptMission={handleAcceptMission}
+          />
+        );
+      case 'wallet':
+        return (
+          <WalletPage
+            wallet={cryptoWallet}
+            market={cryptoMarket}
+          />
+        );
+      case 'darkweb':
+        return (
+          <DarkWebPage
+            blackMarket={blackMarket}
+            playerInventory={playerInventory}
+            cryptoWallet={cryptoWallet}
+            onPurchaseItem={handlePurchaseItem}
+          />
+        );
+      default:
+        return null;
+    }
+  };
+
   return (
     <div className="min-h-screen bg-black bg-gradient-to-br from-gray-900 via-black to-gray-900">
       {/* Background grid pattern */}
       <div className="absolute inset-0 bg-[linear-gradient(rgba(0,255,65,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(0,255,65,0.03)_1px,transparent_1px)] bg-[size:50px_50px]"></div>
       
+      {/* Navigation */}
+      <Navbar currentPage={currentPage} onPageChange={setCurrentPage} />
+      
       {/* Main container */}
-      <div className="relative z-10 min-h-screen flex items-center justify-center p-4">
-        <div className="w-full max-w-7xl h-[85vh] min-h-[700px] flex gap-4">
-          {/* Terminal Panel */}
-          <div className="flex-1 bg-black/90 backdrop-blur-sm border border-green-400/30 rounded-lg shadow-2xl shadow-green-500/10">
-            {/* Glow effect */}
-            <div className="absolute inset-0 bg-gradient-to-r from-green-500/5 via-transparent to-green-500/5 rounded-lg blur-xl"></div>
-            
-            {/* Terminal content */}
-            <div className="relative w-full h-full rounded-lg overflow-hidden">
-              <Terminal toolProgress={toolProgress} />
-            </div>
+      <div className="relative z-10 min-h-[calc(100vh-80px)] flex flex-col">
+        {/* Page Content */}
+        <div className="flex-1 p-4">
+          <div className="w-full max-w-7xl mx-auto h-[calc(100vh-160px)] min-h-[600px]">
+            {renderCurrentPage()}
           </div>
-          
-          {/* Network Map Panel */}
-          <div className="w-80 shadow-2xl shadow-green-500/10">
-            <NetworkMap 
-              nodes={networkNodes}
-              onNodeClick={handleNodeClick}
-              playerPosition={playerPosition}
-            />
+        </div>
+        
+        {/* Trace Indicator at bottom */}
+        <div className="p-4 border-t border-green-400/30 bg-black/50">
+          <div className="max-w-7xl mx-auto">
+            <TraceIndicator traceState={traceState} />
           </div>
         </div>
       </div>
-      
-      {/* Connection Modal */}
-      <ConnectionModal
-        node={connectedNode}
-        isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        onDownload={handleDownload}
-      />
       
       {/* Downloads Panel */}
       <DownloadsPanel
@@ -568,32 +695,6 @@ function App() {
         onUpdateSkillTree={handleUpdateSkillTree}
       />
       
-      {/* Crypto Wallet Panel */}
-      <CryptoWalletPanel
-        wallet={cryptoWallet}
-        market={cryptoMarket}
-        isOpen={isCryptoWalletOpen}
-        onClose={() => setIsCryptoWalletOpen(false)}
-      />
-      
-      {/* Missions Panel */}
-      <MissionsPanel
-        missionState={missionState}
-        isOpen={isMissionsOpen}
-        onClose={() => setIsMissionsOpen(false)}
-        onAcceptMission={handleAcceptMission}
-      />
-      
-      {/* Black Market Panel */}
-      <BlackMarketPanel
-        blackMarket={blackMarket}
-        playerInventory={playerInventory}
-        cryptoWallet={cryptoWallet}
-        isOpen={isBlackMarketOpen}
-        onClose={() => setIsBlackMarketOpen(false)}
-        onPurchaseItem={handlePurchaseItem}
-      />
-      
       {/* Inventory Panel */}
       <InventoryPanel
         inventory={playerInventory}
@@ -601,11 +702,23 @@ function App() {
         onClose={() => setIsInventoryOpen(false)}
       />
       
+      {/* Game Over Modal */}
+      <GameOverModal
+        isOpen={traceState.gameOver}
+        onReset={handleReset}
+      />
+      
+      {/* Reset Button */}
+      <ResetButton onReset={handleReset} />
+      
       {/* Ambient lighting effects */}
       <div className="absolute top-0 left-1/4 w-96 h-96 bg-green-500/10 rounded-full blur-3xl"></div>
       <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-cyan-500/10 rounded-full blur-3xl"></div>
     </div>
   );
 }
+
+// Helper function for addTransaction import
+import { addTransaction } from './utils/cryptoManager';
 
 export default App;
