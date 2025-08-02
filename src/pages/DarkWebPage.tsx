@@ -4,11 +4,13 @@ import { CryptoWallet } from '../types/crypto';
 import { Globe, ShoppingCart, Package, Star, Lock, CheckCircle, Coins } from 'lucide-react';
 import { formatCurrency } from '../utils/cryptoManager';
 import { formatItemType, getItemTypeIcon } from '../utils/blackMarket';
+import { getMarketPriceModifier } from '../utils/reputationManager';
 
 interface DarkWebPageProps {
   blackMarket: BlackMarketState;
   playerInventory: PlayerInventory;
   cryptoWallet: CryptoWallet;
+  reputationState?: any;
   onPurchaseItem: (itemId: string) => void;
 }
 
@@ -16,6 +18,7 @@ const DarkWebPage: React.FC<DarkWebPageProps> = ({
   blackMarket,
   playerInventory,
   cryptoWallet,
+  reputationState,
   onPurchaseItem
 }) => {
   const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null);
@@ -26,7 +29,9 @@ const DarkWebPage: React.FC<DarkWebPageProps> = ({
     setSelectedItem(null);
   };
 
-  const canAfford = (item: InventoryItem) => cryptoWallet.balance >= item.price;
+  const priceModifier = reputationState ? getMarketPriceModifier(reputationState) : 1.0;
+  const getAdjustedPrice = (item: InventoryItem) => Math.floor(item.price * priceModifier);
+  const canAfford = (item: InventoryItem) => cryptoWallet.balance >= getAdjustedPrice(item);
 
   const availableItems = blackMarket.items.filter(item => !item.owned);
   const ownedItems = blackMarket.items.filter(item => item.owned);
@@ -123,7 +128,12 @@ const DarkWebPage: React.FC<DarkWebPageProps> = ({
                         
                         <div className="flex items-center justify-between">
                           <div className={`font-mono font-bold ${canAfford(item) ? 'text-yellow-400' : 'text-red-500'}`}>
-                            {formatCurrency(item.price)}
+                            {formatCurrency(getAdjustedPrice(item))}
+                            {priceModifier !== 1.0 && (
+                              <div className="text-xs text-gray-400">
+                                Base: {formatCurrency(item.price)}
+                              </div>
+                            )}
                           </div>
                           {!canAfford(item) && (
                             <span className="text-red-500 text-xs">Insufficient Funds</span>
@@ -219,7 +229,12 @@ const DarkWebPage: React.FC<DarkWebPageProps> = ({
                   <div>
                     <span className="text-red-400">Price:</span>
                     <div className="text-yellow-400 font-mono font-bold">
-                      {formatCurrency(selectedItem.price)}
+                      {formatCurrency(getAdjustedPrice(selectedItem))}
+                      {priceModifier !== 1.0 && (
+                        <div className="text-xs text-gray-400">
+                          Base: {formatCurrency(selectedItem.price)}
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -252,6 +267,18 @@ const DarkWebPage: React.FC<DarkWebPageProps> = ({
               <p className="text-sm">
                 Click on any item to view details and purchase options.
               </p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Footer */}
+      <div className="p-4 border-t border-red-400/30 bg-black/50">
+        <div className="text-center text-red-400 text-sm font-mono space-y-1">
+          <div>Underground Marketplace • Untraceable Transactions</div>
+          {reputationState && priceModifier !== 1.0 && (
+            <div className={`text-xs ${priceModifier > 1 ? 'text-red-300' : 'text-green-300'}`}>
+              Reputation {priceModifier > 1 ? 'Penalty' : 'Discount'}: {Math.round((priceModifier - 1) * 100)}%
             </div>
           )}
         </div>

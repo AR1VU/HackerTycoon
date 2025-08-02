@@ -21,6 +21,7 @@ import { CryptoWallet, CryptoMarket } from './types/crypto';
 import { MissionState } from './types/missions';
 import { BlackMarketState, PlayerInventory } from './types/inventory';
 import { TraceState } from './types/trace';
+import { ReputationState } from './types/reputation';
 import { generateNetworkGrid } from './utils/networkGenerator';
 import { setCommandContext } from './utils/commandParser';
 import { DEFAULT_TOOLS, unlockTool } from './utils/toolsManager';
@@ -29,6 +30,7 @@ import { createInitialWallet, createInitialMarket, startMarketUpdates } from './
 import { createInitialMissionState, acceptMission, updateMissionProgress, checkExpiredMissions, completeMission } from './utils/missionManager';
 import { createInitialBlackMarket, createInitialInventory, purchaseItem, getItemEffects } from './utils/blackMarket';
 import { saveGameState, loadGameState, resetGameState, hasExistingGameState } from './utils/storageManager';
+import ReputationPanel from './components/ReputationPanel';
 import { 
   createInitialTraceState, 
   addTraceLevel, 
@@ -39,6 +41,14 @@ import {
   resetTrace,
   getTraceIncreaseForAction 
 } from './utils/traceManager';
+import { 
+  createInitialReputationState, 
+  updateReputation, 
+  applyGameOverPenalties, 
+  triggerRandomEvent,
+  getMarketPriceModifier,
+  checkJailTime 
+} from './utils/reputationManager';
 
 function App() {
   const [currentPage, setCurrentPage] = useState('terminal');
@@ -163,6 +173,16 @@ function App() {
     return createInitialTraceState();
   });
 
+  const [reputationState, setReputationState] = useState<ReputationState>(() => {
+    if (hasExistingGameState()) {
+      const savedState = loadGameState();
+      return savedState.reputationState || createInitialReputationState();
+    }
+    return createInitialReputationState();
+  });
+
+  const [isReputationOpen, setIsReputationOpen] = useState(false);
+
   // Handle scanning - update node statuses
 
   // Update networkNodes dependency for handleScan
@@ -276,6 +296,22 @@ function App() {
   const handleShowInventory = useCallback(() => {
     setIsInventoryOpen(true);
   }, []);
+  
+  // Handle showing reputation panel
+  const handleShowReputation = useCallback(() => {
+    setIsReputationOpen(true);
+  }, []);
+  
+  // Handle reputation updates
+  const handleReputationUpdate = useCallback((
+    change: number, 
+    reason: string, 
+    severity: 'minor' | 'moderate' | 'major' | 'critical' = 'moderate'
+  ) => {
+    const updatedReputation = updateReputation(reputationState, change, reason, severity);
+    setReputationState(updatedReputation);
+    saveGameState({ reputationState: updatedReputation });
+  }, [reputationState]);
 
   // Handle updating tools
   const handleUpdateTools = useCallback((updatedTools: HackingTool[]) => {
@@ -388,7 +424,8 @@ function App() {
   
   // Handle black market purchases
   const handlePurchaseItem = useCallback((itemId: string) => {
-    const result = purchaseItem(itemId, blackMarket.items, playerInventory, cryptoWallet.balance);
+    const priceModifier = getMarketPriceModifier(reputationState);
+    const result = purchaseItem(itemId, blackMarket.items, playerInventory, cryptoWallet.balance, priceModifier);
     
     if (result.success) {
       // Update black market
@@ -403,10 +440,11 @@ function App() {
       // Deduct ɄCoins
       const item = blackMarket.items.find(i => i.id === itemId);
       if (item) {
+        const adjustedPrice = Math.floor(item.price * priceModifier);
         const updatedWallet = addTransaction(
           cryptoWallet,
           'spent',
-          item.price,
+          adjustedPrice,
           `Purchased: ${item.name}`
         );
         setCryptoWallet(updatedWallet);
@@ -419,12 +457,13 @@ function App() {
         });
       }
     }
-  }, [blackMarket, playerInventory, cryptoWallet]);
+  }, [blackMarket, playerInventory, cryptoWallet, reputationState]);
 
   // Handle game reset
   const handleReset = useCallback(() => {
     // Reset trace state
     const newTraceState = resetTrace();
+    const newReputationState = createInitialReputationState();
     
     resetGameState();
     
@@ -443,6 +482,7 @@ function App() {
     
     setTraceState(newTraceState);
     setNetworkNodes(newNetworkNodes);
+    setReputationState(newReputationState);
     setDownloads([]);
     setTools(DEFAULT_TOOLS);
     setSkillTree(newSkillTree);
@@ -463,10 +503,12 @@ function App() {
     setToolProgress(null);
     setIsBlackMarketOpen(false);
     setIsInventoryOpen(false);
+    setIsReputationOpen(false);
     
     // Save initial state
     saveGameState({
       traceState: newTraceState,
+      reputationState: newReputationState,
       networkNodes: newNetworkNodes,
       downloads: [],
       tools: DEFAULT_TOOLS,
@@ -487,12 +529,12 @@ function App() {
     const increase = getTraceIncreaseForAction(action);
     const reason = details || `${action.charAt(0).toUpperCase() + action.slice(1)} operation`;
     
-    const updatedTrace = addTraceLevel(traceState, increase, reason);
+    const updatedTrace = addTraceLevel(traceState, increase, reason, reputationState);
     setTraceState(updatedTrace);
     
     // Save to localStorage
     saveGameState({ traceState: updatedTrace });
-  }, [traceState]);
+  }, [traceState, reputationState]);
 
   // Handle proxy commands
   const handleProxyCommand = useCallback((command: 'on' | 'off') => {
@@ -557,8 +599,11 @@ function App() {
       onProxyCommand: handleProxyCommand,
       onDeleteLogs: handleDeleteLogs,
       traceState,
+      reputationState,
+      onReputationUpdate: handleReputationUpdate,
+      onShowReputation: handleShowReputation,
     });
-  }, [networkNodes, playerPosition, downloads, tools, skillTree, cryptoWallet, cryptoMarket, playerStats, missionState, playerInventory, traceState, handleScanWithNodes, handleConnect, handleShowDownloads, handleShowTools, handleShowHackHistory, handleShowSkillTree, handleShowCryptoWallet, handleShowMissions, handleShowBlackMarket, handleShowInventory, handleUpdateTools, handleUpdateCryptoWallet, handleToolProgress, handleHackSuccess, handleMissionProgress, handleCompleteMission, handleReset, handleTraceUpdate, handleProxyCommand, handleDeleteLogs]);
+  }, [networkNodes, playerPosition, downloads, tools, skillTree, cryptoWallet, cryptoMarket, playerStats, missionState, playerInventory, traceState, reputationState, handleScanWithNodes, handleConnect, handleShowDownloads, handleShowTools, handleShowHackHistory, handleShowSkillTree, handleShowCryptoWallet, handleShowMissions, handleShowBlackMarket, handleShowInventory, handleUpdateTools, handleUpdateCryptoWallet, handleToolProgress, handleHackSuccess, handleMissionProgress, handleCompleteMission, handleReset, handleTraceUpdate, handleProxyCommand, handleDeleteLogs, handleReputationUpdate, handleShowReputation]);
   
   // Start market updates
   React.useEffect(() => {
@@ -597,6 +642,49 @@ function App() {
     
     return () => clearInterval(interval);
   }, [traceState, cryptoWallet]);
+
+  // Handle game over penalties and random events
+  React.useEffect(() => {
+    if (traceState.gameOver && !checkJailTime(reputationState)) {
+      // Apply game over penalties
+      const penalties = applyGameOverPenalties(reputationState, cryptoWallet, tools);
+      
+      setReputationState(penalties.updatedReputation);
+      setCryptoWallet(penalties.updatedWallet);
+      setTools(penalties.updatedTools);
+      
+      // Save updated state
+      saveGameState({
+        reputationState: penalties.updatedReputation,
+        cryptoWallet: penalties.updatedWallet,
+        tools: penalties.updatedTools
+      });
+    }
+  }, [traceState.gameOver, reputationState, cryptoWallet, tools]);
+
+  // Trigger random events periodically
+  React.useEffect(() => {
+    const interval = setInterval(() => {
+      if (!traceState.gameOver && !checkJailTime(reputationState)) {
+        const eventResult = triggerRandomEvent(reputationState, cryptoWallet);
+        
+        if (eventResult.event) {
+          setReputationState(eventResult.updatedReputation);
+          setCryptoWallet(eventResult.updatedWallet);
+          
+          // Display event message in terminal (you could add a notification system here)
+          console.log('Random Event:', eventResult.message);
+          
+          saveGameState({
+            reputationState: eventResult.updatedReputation,
+            cryptoWallet: eventResult.updatedWallet
+          });
+        }
+      }
+    }, 5 * 60 * 1000); // Check every 5 minutes
+    
+    return () => clearInterval(interval);
+  }, [reputationState, cryptoWallet, traceState.gameOver]);
 
   const renderCurrentPage = () => {
     switch (currentPage) {
@@ -647,7 +735,11 @@ function App() {
       <div className="absolute inset-0 bg-[linear-gradient(rgba(0,255,65,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(0,255,65,0.03)_1px,transparent_1px)] bg-[size:50px_50px]"></div>
       
       {/* Navigation */}
-      <Navbar currentPage={currentPage} onPageChange={setCurrentPage} />
+      <Navbar 
+        currentPage={currentPage} 
+        onPageChange={setCurrentPage}
+        reputationState={reputationState}
+      />
       
       {/* Main container */}
       <div className="relative z-10 min-h-[calc(100vh-80px)] flex flex-col">
@@ -700,6 +792,13 @@ function App() {
         inventory={playerInventory}
         isOpen={isInventoryOpen}
         onClose={() => setIsInventoryOpen(false)}
+      />
+      
+      {/* Reputation Panel */}
+      <ReputationPanel
+        reputationState={reputationState}
+        isOpen={isReputationOpen}
+        onClose={() => setIsReputationOpen(false)}
       />
       
       {/* Game Over Modal */}

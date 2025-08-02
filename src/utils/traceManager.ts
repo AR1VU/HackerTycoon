@@ -1,6 +1,8 @@
 import { TraceState, TraceEvent, ProxyConfig } from '../types/trace';
 import { CryptoWallet } from '../types/crypto';
+import { ReputationState } from '../types/reputation';
 import { addTransaction } from './cryptoManager';
+import { getTraceSpeedModifier } from './reputationManager';
 
 const PROXY_CONFIG: ProxyConfig = {
   costPerMinute: 50, // 50 ɄCoins per minute
@@ -23,12 +25,14 @@ export const createInitialTraceState = (): TraceState => ({
 export const addTraceLevel = (
   currentTrace: TraceState,
   amount: number,
-  reason: string
+  reason: string,
+  reputationState?: ReputationState
 ): TraceState => {
   if (currentTrace.gameOver) return currentTrace;
 
   const multiplier = currentTrace.isProxyActive ? PROXY_CONFIG.traceReductionMultiplier : 1;
-  const actualIncrease = amount * multiplier;
+  const reputationMultiplier = reputationState ? getTraceSpeedModifier(reputationState) : 1;
+  const actualIncrease = amount * multiplier * reputationMultiplier;
   const newLevel = Math.min(currentTrace.level + actualIncrease, MAX_TRACE_LEVEL);
   
   const event: TraceEvent = {

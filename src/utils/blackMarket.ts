@@ -126,7 +126,8 @@ export const purchaseItem = (
   itemId: string,
   marketItems: InventoryItem[],
   playerInventory: PlayerInventory,
-  playerBalance: number
+  playerBalance: number,
+  priceModifier: number = 1.0
 ): {
   success: boolean;
   updatedMarket: InventoryItem[];
@@ -153,7 +154,9 @@ export const purchaseItem = (
     };
   }
   
-  if (playerBalance < item.price) {
+  const adjustedPrice = Math.floor(item.price * priceModifier);
+  
+  if (playerBalance < adjustedPrice) {
     return {
       success: false,
       updatedMarket: marketItems,
@@ -165,6 +168,7 @@ export const purchaseItem = (
   const purchasedItem: InventoryItem = {
     ...item,
     owned: true,
+    price: adjustedPrice, // Store the actual price paid
     purchasedAt: new Date()
   };
   
@@ -174,7 +178,7 @@ export const purchaseItem = (
   
   const updatedInventory: PlayerInventory = {
     items: [...playerInventory.items, purchasedItem],
-    totalValue: playerInventory.totalValue + item.price
+    totalValue: playerInventory.totalValue + adjustedPrice
   };
   
   return {

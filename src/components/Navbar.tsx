@@ -1,12 +1,13 @@
 import React from 'react';
-import { Terminal, Target, Wallet, Globe, Home } from 'lucide-react';
+import { Terminal, Target, Wallet, Globe, Home, Award } from 'lucide-react';
 
 interface NavbarProps {
   currentPage: string;
   onPageChange: (page: string) => void;
+  reputationState?: any;
 }
 
-const Navbar: React.FC<NavbarProps> = ({ currentPage, onPageChange }) => {
+const Navbar: React.FC<NavbarProps> = ({ currentPage, onPageChange, reputationState }) => {
   const navItems = [
     { id: 'terminal', label: 'Terminal', icon: Terminal },
     { id: 'missions', label: 'Missions', icon: Target },
@@ -22,6 +23,17 @@ const Navbar: React.FC<NavbarProps> = ({ currentPage, onPageChange }) => {
           <span className="text-green-300 font-mono text-xl font-bold">
             Hacker Tycoon
           </span>
+          {reputationState && (
+            <div className="flex items-center space-x-2 ml-4">
+              <Award className="w-4 h-4 text-purple-400" />
+              <span className={`font-mono text-sm ${reputationState.rank.color}`}>
+                {reputationState.title}
+              </span>
+              <span className="text-purple-300 text-sm">
+                ({reputationState.level})
+              </span>
+            </div>
+          )}
         </div>
         
         <div className="flex items-center space-x-1">

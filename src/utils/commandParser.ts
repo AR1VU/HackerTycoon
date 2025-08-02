@@ -1,718 +1,914 @@
-import { Command, CommandResult } from '../types/terminal';
+import { CommandResult } from '../types/terminal';
 import { NetworkNode } from '../types/network';
 import { DownloadedFile } from '../types/filesystem';
-import { HackingTool, ToolResult } from '../types/tools';
-import { SkillTreeState, PlayerStats } from '../types/skills';
+import { HackingTool } from '../types/tools';
+import { SkillTreeState } from '../types/skills';
 import { CryptoWallet, CryptoMarket } from '../types/crypto';
-import { MissionState } from '../types/missions';
+import { PlayerInventory } from '../types/inventory';
 import { TraceState } from '../types/trace';
+import { ReputationState } from '../types/reputation';
 import { getNodesInRadius } from './networkGenerator';
-import { 
-  checkToolCooldown, 
-  getRemainingCooldown, 
-  simulateToolExecution,
-  updateToolLastUsed 
-} from './toolsManager';
-import { 
-  formatCurrency, 
-  formatUSD, 
-  calculateHackReward, 
-  addTransaction 
-} from '../utils/cryptoManager';
+import { simulateToolExecution, checkToolCooldown, updateToolLastUsed } from './toolsManager';
 import { addHackAttempt } from './hackTracker';
+import { calculateHackReward, addTransaction } from './cryptoManager';
+import { getItemEffects } from './blackMarket';
 
-interface CommandContext {
-  networkNodes: NetworkNode[];
-  playerPosition: { x: number; y: number };
-  downloads: DownloadedFile[];
-  tools: HackingTool[];
-  skillTree: SkillTreeState;
-  cryptoWallet: CryptoWallet;
-  cryptoMarket: CryptoMarket;
-  missionState: MissionState;
-  playerStats: PlayerStats;
-  playerInventory: any;
-  traceState: TraceState;
-  onScan: (scannedNodes: NetworkNode[]) => void;
-  onConnect: (node: NetworkNode) => void;
-  onShowDownloads: () => void;
-  onShowTools: () => void;
-  onShowHackHistory: () => void;
-  onShowCryptoWallet: () => void;
-  onShowMissions: () => void;
-  onShowBlackMarket: () => void;
-  onShowInventory: () => void;
-  onUpdateTools: (tools: HackingTool[]) => void;
-  onUpdateCryptoWallet: (wallet: CryptoWallet) => void;
-  onToolProgress: (progress: number, message: string) => void;
-  onShowSkillTree: () => void;
-  onHackSuccess: () => void;
-  onMissionProgress: (eventType: 'hack_success' | 'file_download' | 'tool_use' | 'crypto_earn', eventData: any) => void;
-  onCompleteMission: (missionId: string) => void;
-  onResetGame: () => void;
-  onTraceUpdate: (action: string, details?: string) => void;
-  onProxyCommand: (command: 'on' | 'off') => string;
-  onDeleteLogs: (serverIp: string) => string;
+export interface ParsedCommand {
+  command: string;
+  args: string[];
+  flags: Record<string, string | boolean>;
 }
 
+export interface CommandContext {
+  currentDirectory: string;
+  environment: Record<string, string>;
+  history: string[];
+}
 
-let commandContext: CommandContext | null = null;
+// Extended command context for hacking game
+interface GameCommandContext extends CommandContext {
+  networkNodes?: NetworkNode[];
+  playerPosition?: { x: number; y: number };
+  downloads?: DownloadedFile[];
+  tools?: HackingTool[];
+  skillTree?: SkillTreeState;
+  cryptoWallet?: CryptoWallet;
+  cryptoMarket?: CryptoMarket;
+  playerStats?: any;
+  playerInventory?: PlayerInventory;
+  traceState?: TraceState;
+  reputationState?: ReputationState;
+  onScan?: (nodes: NetworkNode[]) => void;
+  onConnect?: (node: NetworkNode) => void;
+  onShowDownloads?: () => void;
+  onShowTools?: () => void;
+  onShowHackHistory?: () => void;
+  onShowSkillTree?: () => void;
+  onShowCryptoWallet?: () => void;
+  onShowMissions?: () => void;
+  onShowBlackMarket?: () => void;
+  onShowInventory?: () => void;
+  onShowReputation?: () => void;
+  onUpdateTools?: (tools: HackingTool[]) => void;
+  onUpdateCryptoWallet?: (wallet: CryptoWallet) => void;
+  onToolProgress?: (progress: number, message: string) => void;
+  onHackSuccess?: () => void;
+  onMissionProgress?: (eventType: string, eventData: any) => void;
+  onCompleteMission?: (missionId: string) => void;
+  onResetGame?: () => void;
+  onTraceUpdate?: (action: string, details?: string) => void;
+  onProxyCommand?: (command: 'on' | 'off') => string;
+  onDeleteLogs?: (serverIp: string) => string;
+  onReputationUpdate?: (change: number, reason: string, severity?: string) => void;
+}
 
-export const setCommandContext = (context: CommandContext) => {
-  commandContext = context;
+let commandContext: CommandContext = {
+  currentDirectory: '/',
+  environment: {},
+  history: []
 };
 
-const getCommands = (): Record<string, Command> => ({
-  help: {
-    name: 'help',
-    description: 'Display available commands',
-    execute: () => [
-      'Available commands:',
-      '',
-      '📋 SYSTEM COMMANDS:',
-      '  help           - Display this help message',
-      '  clear          - Clear the terminal screen',
-      '  echo [text]    - Print text to the terminal',
-      '  whoami         - Display current user information',
-      '  date           - Display current date and time',
-      '  system         - Display system information',
-      '  trace          - Display current trace level and status',
-      '',
-      '🔍 NETWORK COMMANDS:',
-      '  scan           - Scan nearby network nodes',
-      '  connect [ip]   - Connect to a scanned network node',
-      '',
-      '⚔️  HACKING TOOLS:',
-      '  bruteforce [ip]        - Brute force attack on target',
-      '  ddos [ip]              - DDoS attack on target',
-      '  inject [ip] [script]   - Code injection attack',
-      '  bypass [ip] [firewall] - Bypass firewall protection',
-      '',
-      '🛡️  SECURITY COMMANDS:',
-      '  proxy [on|off]         - Activate/deactivate proxy network',
-      '  logs delete [ip]       - Delete logs from compromised server',
-      '',
-      '📊 INFORMATION PANELS:',
-      '  downloads      - View downloaded files',
-      '  tools          - View available hacking tools',
-      '  history        - View hack history and statistics',
-      '  skills         - View and manage skill tree',
-      '',
-      'Welcome to Hacker Tycoon v1.0',
-      'Type commands to interact with the system.',
-    ],
-  },
-  clear: {
-    name: 'clear',
-    description: 'Clear the terminal screen',
-    execute: () => [],
-  },
-  echo: {
-    name: 'echo',
-    description: 'Print text to the terminal',
-    execute: (args) => [args.join(' ') || ''],
-  },
-  whoami: {
-    name: 'whoami',
-    description: 'Display current user information',
-    execute: () => ['hacker@tycoon-terminal'],
-  },
-  date: {
-    name: 'date',
-    description: 'Display current date and time',
-    execute: () => [new Date().toString()],
-  },
-  system: {
-    name: 'system',
-    description: 'Display system information',
-    execute: () => [
-      'Hacker Tycoon Terminal v1.0',
-      'OS: CyberLinux 3.14',
-      'Kernel: 5.15.0-hacker',
-      'Architecture: x86_64',
-      'Memory: 16GB DDR4',
-      'Status: CONNECTED',
-    ],
-  },
-  trace: {
-    name: 'trace',
-    description: 'Display current trace level and status',
-    execute: () => {
-      if (!commandContext) {
-        return ['Error: Trace system not initialized'];
-      }
-      
-      const { traceState } = commandContext;
-      
-      const output = [
-        '╔══════════════════════════════════════════════════════════════╗',
-        '║                      TRACE STATUS                            ║',
-        '╚══════════════════════════════════════════════════════════════╝',
-        '',
-        `Current Trace Level: ${traceState.level.toFixed(1)}%`,
-        `Proxy Status: ${traceState.isProxyActive ? 'ACTIVE' : 'INACTIVE'}`,
-        `Last Activity: ${new Date(traceState.lastActivity).toLocaleTimeString()}`,
-        ''
-      ];
-      
-      if (traceState.level < 30) {
-        output.push('🟢 Status: SAFE - Low detection risk');
-      } else if (traceState.level < 60) {
-        output.push('🟡 Status: CAUTION - Moderate detection risk');
-      } else if (traceState.level < 90) {
-        output.push('🟠 Status: HIGH RISK - Authorities may be tracking');
-      } else {
-        output.push('🔴 Status: CRITICAL - Immediate danger of detection');
-      }
-      
-      output.push('');
-      output.push('💡 Use "proxy on" to reduce trace accumulation');
-      output.push('💡 Use "logs delete [ip]" to reduce trace level');
-      
-      return output;
-    },
-  },
-  proxy: {
-    name: 'proxy',
-    description: 'Activate or deactivate proxy network',
-    execute: (args) => {
-      if (!commandContext) {
-        return ['Error: Proxy system not initialized'];
-      }
-      
-      if (args.length === 0) {
-        const { traceState } = commandContext;
-        return [
-          'Proxy Network Status:',
-          `Status: ${traceState.isProxyActive ? 'ACTIVE' : 'INACTIVE'}`,
-          `Cost: 50 ɄCoins per minute`,
-          `Effect: Reduces trace accumulation by 60%`,
-          '',
-          'Usage: proxy [on|off]',
-          'Example: proxy on'
-        ];
-      }
-      
-      const command = args[0].toLowerCase();
-      if (command !== 'on' && command !== 'off') {
-        return [
-          'Invalid proxy command.',
-          'Usage: proxy [on|off]',
-          'Example: proxy on'
-        ];
-      }
-      
-      const { onProxyCommand } = commandContext;
-      const result = onProxyCommand(command as 'on' | 'off');
-      
-      return [result];
-    },
-  },
-  logs: {
-    name: 'logs',
-    description: 'Manage server logs',
-    execute: (args) => {
-      if (!commandContext) {
-        return ['Error: Log management system not initialized'];
-      }
-      
-      if (args.length < 2 || args[0] !== 'delete') {
-        return [
-          'Log Management Commands:',
-          '',
-          '  logs delete [ip]  - Delete logs from compromised server',
-          '',
-          'Deleting logs reduces your trace level but requires',
-          'the target server to be compromised (bypassed or hacked).',
-          '',
-          'Example: logs delete 192.168.1.100'
-        ];
-      }
-      
-      const serverIp = args[1];
-      const { networkNodes, onDeleteLogs } = commandContext;
-      
-      // Check if server exists and is compromised
-      const targetNode = networkNodes.find(node => node.ip === serverIp);
-      if (!targetNode) {
-        return [`Error: Server ${serverIp} not found in network`];
-      }
-      
-      if (targetNode.status !== 'Bypassed' && targetNode.status !== 'Hacked') {
-        return [
-          `Error: Cannot delete logs from ${serverIp}`,
-          `Server status: ${targetNode.status}`,
-          'Server must be bypassed or hacked to delete logs.'
-        ];
-      }
-      
-      const result = onDeleteLogs(serverIp);
-      
-      return [
-        `Accessing ${serverIp}...`,
-        'Locating system logs...',
-        'Deleting access records...',
-        'Clearing authentication logs...',
-        'Removing trace evidence...',
-        '',
-        '✓ Log deletion successful',
-        result,
-        '',
-        'Your digital footprint has been reduced.'
-      ];
-    },
-  },
-  scan: {
-    name: 'scan',
-    description: 'Scan nearby network nodes',
-    execute: () => {
-      if (!commandContext) {
-        return ['Error: Network interface not initialized'];
-      }
-      
-      const { networkNodes, playerPosition, playerStats, onScan } = commandContext;
-      const scanRadius = playerStats.scanRadius || 2;
-      const nearbyNodes = getNodesInRadius(networkNodes, playerPosition.x, playerPosition.y, scanRadius);
-      
-      if (nearbyNodes.length === 0) {
-        return [
-          'Network scan complete.',
-          'No vulnerable nodes detected in range.',
-          'Try moving to a different location.',
-        ];
-      }
-      
-      // Mark nodes as scanned
-      const scannedNodes = nearbyNodes.map(node => ({ ...node, status: 'Scanned' as const }));
-      onScan(scannedNodes);
-      
-      // Update trace level
-      const { onTraceUpdate } = commandContext;
-      onTraceUpdate('scan', `Network scan (${nearbyNodes.length} nodes)`);
-      
-      const results = [
-        'Network scan initiated...',
-        `Scanning radius: ${scanRadius} nodes`,
-        '',
-        `Found ${nearbyNodes.length} vulnerable node(s):`,
-        '',
-      ];
-      
-      nearbyNodes.forEach(node => {
-        const riskColor = node.vulnerability === 'High' ? '[HIGH RISK]' : 
-                         node.vulnerability === 'Medium' ? '[MEDIUM RISK]' : '[LOW RISK]';
-        results.push(`  ${node.ip} - ${riskColor}`);
-      });
-      
-      results.push('');
-      results.push('Use "connect [ip]" to establish connection.');
-      
-      return results;
-    },
-  },
-  connect: {
-    name: 'connect',
-    description: 'Connect to a scanned network node',
-    execute: (args) => {
-      if (!commandContext) {
-        return ['Error: Network interface not initialized'];
-      }
-      
-      if (args.length === 0) {
-        return ['Usage: connect [ip]', 'Example: connect 192.168.1.100'];
-      }
-      
-      const targetIp = args[0];
-      const { networkNodes, onConnect } = commandContext;
-      const targetNode = networkNodes.find(node => node.ip === targetIp);
-      
-      if (!targetNode) {
-        return [`Error: IP address ${targetIp} not found in network.`];
-      }
-      
-      if (targetNode.status !== 'Bruteforced' && targetNode.status !== 'Connected') {
-        return [
-          `Error: Cannot connect to ${targetIp}`,
-          `Current status: ${targetNode.status}`,
-          'Node must be bruteforced first. Use "bruteforce [ip]" command.'
-        ];
-      }
-      
-      if (targetNode.isPlayerLocation) {
-        return ['Error: Cannot connect to your own location.'];
-      }
-      
-      if (targetNode.isTemporarilyDown && targetNode.downUntil && Date.now() < targetNode.downUntil) {
-        const remainingTime = Math.ceil((targetNode.downUntil - Date.now()) / 1000);
-        return [
-          `Error: Server ${targetIp} is temporarily down`,
-          `Time remaining: ${remainingTime} seconds`,
-          'Server was disabled by DDoS attack'
-        ];
-      }
-      
-      // Trigger connection
-      onConnect(targetNode);
-      
-      // Update trace level
-      const { onTraceUpdate } = commandContext;
-      onTraceUpdate('connect', `Connection to ${targetIp}`);
-      
-      return [
-        `Initiating connection to ${targetIp}...`,
-        'Establishing secure tunnel...',
-        `Successfully connected to ${targetIp}`,
-        'Use "bypass" to access file system for downloads',
-        '',
-        'Connection details displayed in popup window.',
-      ];
-    },
-  },
-  downloads: {
-    name: 'downloads',
-    description: 'View downloaded files',
-    execute: () => {
-      if (!commandContext) {
-        return ['Error: Downloads system not initialized'];
-      }
-      
-      const { downloads, onShowDownloads } = commandContext;
-      onShowDownloads();
-      
-      return [
-        `Opening downloads panel...`,
-        `Total files: ${downloads.length}`,
-        downloads.length === 0 ? 'No files downloaded yet.' : 'Downloads panel opened.',
-      ];
-    },
-  },
-  tools: {
-    name: 'tools',
-    description: 'View available hacking tools',
-    execute: () => {
-      if (!commandContext) {
-        return ['Error: Tools system not initialized'];
-      }
-      
-      const { tools, onShowTools } = commandContext;
-      onShowTools();
-      
-      const unlockedTools = tools.filter(tool => tool.unlocked);
-      
-      return [
-        `Opening tools panel...`,
-        `Unlocked tools: ${unlockedTools.length}/${tools.length}`,
-        'Tools panel opened.',
-      ];
-    },
-  },
-  history: {
-    name: 'history',
-    description: 'View hack history and statistics',
-    execute: () => {
-      if (!commandContext) {
-        return ['Error: History system not initialized'];
-      }
-      
-      const { onShowHackHistory } = commandContext;
-      onShowHackHistory();
-      
-      return [
-        'Opening hack history panel...',
-        'View all your previous hack attempts and success rates.',
-      ];
-    },
-  },
-  skills: {
-    name: 'skills',
-    description: 'View and manage skill tree',
-    execute: () => {
-      if (!commandContext) {
-        return ['Error: Skills system not initialized'];
-      }
-      
-      const { skillTree, onShowSkillTree } = commandContext;
-      onShowSkillTree();
-      
-      const purchased = skillTree.nodes.filter(s => s.purchased).length;
-      const available = skillTree.nodes.filter(s => s.unlocked && !s.purchased).length;
-      
-      return [
-        'Opening skill tree panel...',
-        `Skill Points: ${skillTree.skillPoints}`,
-        `Skills Purchased: ${purchased}/${skillTree.nodes.length}`,
-        `Skills Available: ${available}`,
-        'Skill tree panel opened.',
-      ];
-    },
-  },
-  bruteforce: {
-    name: 'bruteforce',
-    description: 'Brute force attack on target system',
-    execute: (args) => executeHackingTool('bruteforce', args),
-  },
-  ddos: {
-    name: 'ddos',
-    description: 'DDoS attack on target system',
-    execute: (args) => executeHackingTool('ddos', args),
-  },
-  inject: {
-    name: 'inject',
-    description: 'Code injection attack on target system',
-    execute: (args) => executeHackingTool('inject', args),
-  },
-  bypass: {
-    name: 'bypass',
-    description: 'Bypass firewall protection',
-    execute: (args) => executeHackingTool('bypass', args),
-  },
-});
+let gameContext: GameCommandContext = commandContext;
 
-const executeHackingTool = (toolId: string, args: string[]): string[] => {
-  if (!commandContext) {
-    return ['Error: Tools system not initialized'];
-  }
+// Basic command implementations
+const commands: Record<string, (args: string[], flags: Record<string, string | boolean>) => string[]> = {
+  help: () => [
+    'Available commands:',
+    '  help     - Show this help message',
+    '  clear    - Clear the terminal',
+    '',
+    'Hacking Commands:',
+    '  scan [radius]     - Scan nearby network nodes',
+    '  bruteforce <ip>   - Brute force attack on target',
+    '  connect <ip>      - Connect to compromised target',
+    '  bypass <ip>       - Bypass firewall protection',
+    '  inject <ip> [script] - Inject malicious code',
+    '  download <file>   - Download file from connected server',
+    '',
+    'System Commands:',
+    '  tools      - Show available hacking tools',
+    '  downloads  - View downloaded files',
+    '  history    - Show hack history',
+    '  skills     - View skill tree',
+    '  wallet     - Show crypto wallet',
+    '  missions   - View available missions',
+    '  darkweb    - Access dark web market',
+    '  inventory  - View owned items',
+    '  reputation - View reputation status',
+    '  proxy <on|off> - Control proxy network',
+    '  logs <ip>  - Delete server logs',
+    '  reset      - Reset game progress',
+    '',
+    'Utility Commands:',
+    '  ls         - List directory contents',
+    '  pwd        - Print working directory',
+    '  whoami     - Display current user',
+    '  date       - Show current date and time',
+    '  echo <text> - Display text',
+    '  status     - Show system status'
+  ],
   
-  const { tools, networkNodes, playerStats, cryptoWallet, onUpdateTools, onUpdateCryptoWallet, onToolProgress, onScan, onHackSuccess, onMissionProgress } = commandContext;
+  clear: () => ['CLEAR'],
   
-  // Find the tool
-  const tool = tools.find(t => t.id === toolId);
-  if (!tool) {
-    return [`Error: Tool ${toolId} not found`];
-  }
+  ls: () => [
+    'total 8',
+    'drwxr-xr-x  2 hacker hacker 4096 Jan 15 12:00 documents',
+    'drwxr-xr-x  2 hacker hacker 4096 Jan 15 12:00 downloads',
+    '-rw-r--r--  1 hacker hacker  256 Jan 15 12:00 readme.txt'
+  ],
   
-  // Check if tool is unlocked
-  if (!tool.unlocked) {
-    return [
-      `Error: Tool "${tool.name}" is locked`,
-      'Complete more hacks to unlock advanced tools',
-      'Use "tools" command to view available tools'
+  pwd: () => [commandContext.currentDirectory],
+  
+  whoami: () => ['hacker'],
+  
+  date: () => [new Date().toString()],
+  
+  echo: (args) => [args.join(' ')],
+  
+  // Hacking Commands
+  scan: (args) => {
+    if (!gameContext.networkNodes || !gameContext.playerPosition) {
+      return ['Error: Network interface not initialized'];
+    }
+
+    const radius = args[0] ? parseInt(args[0]) : (gameContext.playerStats?.scanRadius || 2);
+    if (isNaN(radius) || radius < 1 || radius > 10) {
+      return ['Error: Invalid scan radius. Use 1-10.'];
+    }
+
+    const nearbyNodes = getNodesInRadius(
+      gameContext.networkNodes,
+      gameContext.playerPosition.x,
+      gameContext.playerPosition.y,
+      radius
+    );
+
+    if (nearbyNodes.length === 0) {
+      return ['No network nodes detected in scan radius.'];
+    }
+
+    // Update trace
+    if (gameContext.onTraceUpdate) {
+      gameContext.onTraceUpdate('scan', `Scanned ${nearbyNodes.length} nodes`);
+    }
+
+    // Mark nodes as scanned and trigger callback
+    const scannedNodes = nearbyNodes.map(node => ({ ...node, status: 'Scanned' as const }));
+    if (gameContext.onScan) {
+      gameContext.onScan(scannedNodes);
+    }
+
+    const output = [
+      `Scanning network within radius ${radius}...`,
+      `Found ${nearbyNodes.length} network nodes:`,
+      ''
     ];
-  }
-  
-  // Check cooldown
-  if (!checkToolCooldown(tool)) {
-    const remaining = getRemainingCooldown(tool);
-    const mins = Math.floor(remaining / 60);
-    const secs = Math.floor(remaining % 60);
-    const timeStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+
+    nearbyNodes.forEach(node => {
+      output.push(`${node.ip.padEnd(15)} | ${node.vulnerability.padEnd(8)} | Distance: ${Math.round(Math.sqrt(Math.pow(node.x - gameContext.playerPosition!.x, 2) + Math.pow(node.y - gameContext.playerPosition!.y, 2)) * 10) / 10}`);
+    });
+
+    output.push('');
+    output.push('Use "bruteforce <ip>" to attack a target');
+
+    return output;
+  },
+
+  bruteforce: (args) => {
+    if (args.length === 0) {
+      return ['Usage: bruteforce <target_ip>'];
+    }
+
+    const targetIp = args[0];
+    const targetNode = gameContext.networkNodes?.find(node => node.ip === targetIp);
     
-    return [
-      `Error: Tool "${tool.name}" is on cooldown`,
-      `Time remaining: ${timeStr}`,
-      'Wait before using this tool again'
-    ];
-  }
-  
-  // Validate arguments
-  if (args.length === 0) {
-    return [
-      `Usage: ${toolId} [ip] ${toolId === 'inject' ? '[script]' : toolId === 'bypass' ? '[firewall]' : ''}`,
-      'Example: ' + getToolExample(toolId)
-    ];
-  }
-  
-  const targetIp = args[0];
-  const targetNode = networkNodes.find(node => node.ip === targetIp);
-  
-  if (!targetNode) {
-    return [`Error: IP address ${targetIp} not found in network`];
-  }
-  
-  // Check prerequisites for each tool
-  if (toolId === 'bruteforce') {
-    if (targetNode.status !== 'Scanned') {
-      return [
-        `Error: Cannot bruteforce ${targetIp}`,
-        'Node must be scanned first. Use "scan" command.'
-      ];
+    if (!targetNode) {
+      return [`Error: Target ${targetIp} not found. Use "scan" first.`];
     }
-  } else if (toolId === 'ddos') {
+
     if (targetNode.status === 'Hidden') {
-      return [
-        `Error: Cannot DDoS ${targetIp}`,
-        'Node must be scanned first. Use "scan" command.'
-      ];
+      return [`Error: Target ${targetIp} not scanned. Use "scan" first.`];
     }
-  } else if (toolId === 'bypass') {
-    if (targetNode.status !== 'Connected') {
-      return [
-        `Error: Cannot bypass ${targetIp}`,
-        'Must be connected to target first. Use "connect [ip]" command.'
-      ];
+
+    const bruteForceTool = gameContext.tools?.find(tool => tool.id === 'bruteforce');
+    if (!bruteForceTool || !bruteForceTool.unlocked) {
+      return ['Error: Brute force tool not available'];
     }
-  } else if (toolId === 'inject') {
-    if (targetNode.status !== 'Bypassed') {
-      return [
-        `Error: Cannot inject into ${targetIp}`,
-        'Must bypass firewall first. Use "bypass [ip]" command.'
-      ];
+
+    if (!checkToolCooldown(bruteForceTool)) {
+      const remaining = Math.ceil((bruteForceTool.cooldown - (Date.now() - bruteForceTool.lastUsed) / 1000));
+      return [`Error: Brute force tool on cooldown. ${remaining}s remaining.`];
     }
-  }
-  
-  if (targetNode.isTemporarilyDown && targetNode.downUntil && Date.now() < targetNode.downUntil && toolId !== 'ddos') {
-    const remainingTime = Math.ceil((targetNode.downUntil - Date.now()) / 1000);
-    return [
-      `Error: Server ${targetIp} is temporarily down`,
-      `Time remaining: ${remainingTime} seconds`,
-      'Server was disabled by DDoS attack'
-    ];
-  }
-  
-  if (targetNode.isPlayerLocation) {
-    return ['Error: Cannot target your own location'];
-  }
-  
-  // Update tool last used time
-  const updatedTools = updateToolLastUsed(toolId, tools);
-  onUpdateTools(updatedTools);
-  
-  // Update trace level
-  const { onTraceUpdate } = commandContext;
-  onTraceUpdate(toolId, `${tool.name} attack on ${targetIp}`);
-  
-  // Start tool execution
-  const additionalArgs = args.slice(1);
-  
-  // Execute tool asynchronously with progress updates
-  setTimeout(async () => {
-    try {
-      const result = await simulateToolExecution(tool, targetNode, additionalArgs, onToolProgress);
+
+    // Check if server is down
+    if (targetNode.isTemporarilyDown && targetNode.downUntil && Date.now() < targetNode.downUntil) {
+      return [`Error: Target server ${targetIp} is currently offline`];
+    }
+
+    // Apply inventory effects
+    const inventoryEffects = gameContext.playerInventory ? getItemEffects(gameContext.playerInventory) : {
+      cooldownReductions: {},
+      successRateBoosts: {},
+      scanRadiusBonus: 0,
+      stealthBonus: 0,
+      hasAutoExploit: false
+    };
+
+    // Calculate success rate with bonuses
+    let baseSuccessRate = bruteForceTool.successRate[targetNode.vulnerability.toLowerCase() as keyof typeof bruteForceTool.successRate];
+    const successRateBonus = inventoryEffects.successRateBoosts['bruteforce'] || 0;
+    const finalSuccessRate = Math.min(1, baseSuccessRate + successRateBonus);
+    
+    const success = Math.random() < finalSuccessRate;
+
+    // Update tool cooldown
+    if (gameContext.onUpdateTools) {
+      const updatedTools = updateToolLastUsed('bruteforce', gameContext.tools || []);
+      gameContext.onUpdateTools(updatedTools);
+    }
+
+    // Update trace
+    if (gameContext.onTraceUpdate) {
+      gameContext.onTraceUpdate('bruteforce', `Brute force attack on ${targetIp}`);
+    }
+
+    // Add to hack history
+    if (gameContext.networkNodes) {
+      const updatedNodes = addHackAttempt(gameContext.networkNodes, targetIp, bruteForceTool, success, targetNode.vulnerability);
+      if (gameContext.onScan) {
+        gameContext.onScan(updatedNodes);
+      }
+    }
+
+    if (success) {
+      // Update node status
+      targetNode.status = 'Bruteforced';
       
-      // Update nodes with hack attempt and status changes
-      let updatedNodes = [...networkNodes];
-      
-      // Add hack attempt to history
-      updatedNodes = addHackAttempt(updatedNodes, targetIp, tool, result.success, targetNode.vulnerability);
-      
-      // Update node status based on successful tool execution
-      if (result.success) {
-        // Award skill points for successful hack
-        onHackSuccess();
-        
-        // Award ɄCoins for successful hack
-        const reward = calculateHackReward(targetNode.vulnerability, toolId);
+      // Award crypto and trigger callbacks
+      const reward = calculateHackReward(targetNode.vulnerability, 'bruteforce');
+      if (gameContext.onUpdateCryptoWallet && gameContext.cryptoWallet) {
         const updatedWallet = addTransaction(
-          cryptoWallet,
+          gameContext.cryptoWallet,
           'earned',
           reward,
-          `Successful ${tool.name} on ${targetIp} (${targetNode.vulnerability} risk)`
+          `Brute force hack: ${targetIp}`
         );
-        onUpdateCryptoWallet(updatedWallet);
-        
-        // Update mission progress
-        onMissionProgress('hack_success', { 
-          vulnerability: targetNode.vulnerability,
-          toolId: toolId
-        });
-        onMissionProgress('tool_use', { toolId: toolId });
-        onMissionProgress('crypto_earn', { amount: reward });
-        
-        updatedNodes = updatedNodes.map(node => {
-          if (node.id === targetNode.id) {
-            if (toolId === 'bruteforce') {
-              return { ...node, status: 'Bruteforced' as const };
-            } else if (toolId === 'ddos') {
-              return { 
-                ...node, 
-                isTemporarilyDown: true, 
-                downUntil: Date.now() + 30000 // 30 seconds
-              };
-            } else if (toolId === 'bypass') {
-              return { ...node, status: 'Bypassed' as const };
-            } else if (toolId === 'inject') {
-              return { 
-                ...node, 
-                status: 'Hacked' as const,
-                isTemporarilyDown: true,
-                downUntil: Date.now() + 60000 // 1 minute shutdown
-              };
-            }
-          }
-          return node;
-        });
+        gameContext.onUpdateCryptoWallet(updatedWallet);
       }
-      
-      // Use onScan to update the nodes and save to localStorage
-      onScan(updatedNodes);
-    } catch (error) {
-      console.error('Tool execution error:', error);
+
+      // Update mission progress
+      if (gameContext.onMissionProgress) {
+        gameContext.onMissionProgress('hack_success', { vulnerability: targetNode.vulnerability });
+        gameContext.onMissionProgress('tool_use', { toolId: 'bruteforce' });
+      }
+
+      // Update reputation
+      if (gameContext.onReputationUpdate) {
+        const repChange = targetNode.vulnerability === 'High' ? 3 : targetNode.vulnerability === 'Medium' ? 2 : 1;
+        gameContext.onReputationUpdate(repChange, `Successful brute force attack on ${targetNode.vulnerability} security target`);
+      }
+
+      if (gameContext.onHackSuccess) {
+        gameContext.onHackSuccess();
+      }
+
+      return [
+        `✓ Brute force attack successful on ${targetIp}`,
+        `Credentials discovered: admin / ${generateRandomPassword()}`,
+        `Earned: ${reward} ɄCoins`,
+        'Login credentials obtained',
+        'Use "connect ' + targetIp + '" to establish connection'
+      ];
+    } else {
+      return [
+        `✗ Brute force attack failed on ${targetIp}`,
+        'Password dictionary exhausted',
+        'Account lockout detected',
+        'Consider using advanced tools for high-security targets'
+      ];
     }
-  }, 100);
+  },
+
+  connect: (args) => {
+    if (args.length === 0) {
+      return ['Usage: connect <target_ip>'];
+    }
+
+    const targetIp = args[0];
+    const targetNode = gameContext.networkNodes?.find(node => node.ip === targetIp);
+    
+    if (!targetNode) {
+      return [`Error: Target ${targetIp} not found`];
+    }
+
+    if (targetNode.status !== 'Bruteforced' && targetNode.status !== 'Connected' && targetNode.status !== 'Bypassed') {
+      return [`Error: Cannot connect to ${targetIp}. Use "bruteforce" first.`];
+    }
+
+    // Update trace
+    if (gameContext.onTraceUpdate) {
+      gameContext.onTraceUpdate('connect', `Connected to ${targetIp}`);
+    }
+
+    // Trigger connection modal
+    if (gameContext.onConnect) {
+      gameContext.onConnect(targetNode);
+    }
+
+    return [
+      `Establishing connection to ${targetIp}...`,
+      'Connection successful!',
+      'Opening secure terminal session...'
+    ];
+  },
+
+  bypass: (args) => {
+    if (args.length === 0) {
+      return ['Usage: bypass <target_ip>'];
+    }
+
+    const targetIp = args[0];
+    const targetNode = gameContext.networkNodes?.find(node => node.ip === targetIp);
+    
+    if (!targetNode) {
+      return [`Error: Target ${targetIp} not found`];
+    }
+
+    if (targetNode.status !== 'Connected' && targetNode.status !== 'Bruteforced') {
+      return [`Error: Must be connected to ${targetIp} first. Use "connect" command.`];
+    }
+
+    const bypassTool = gameContext.tools?.find(tool => tool.id === 'bypass');
+    if (!bypassTool || !bypassTool.unlocked) {
+      return ['Error: Bypass tool not available'];
+    }
+
+    if (!checkToolCooldown(bypassTool)) {
+      const remaining = Math.ceil((bypassTool.cooldown - (Date.now() - bypassTool.lastUsed) / 1000));
+      return [`Error: Bypass tool on cooldown. ${remaining}s remaining.`];
+    }
+
+    // Apply inventory effects
+    const inventoryEffects = gameContext.playerInventory ? getItemEffects(gameContext.playerInventory) : {
+      cooldownReductions: {},
+      successRateBoosts: {},
+      scanRadiusBonus: 0,
+      stealthBonus: 0,
+      hasAutoExploit: false
+    };
+
+    // Calculate success rate with bonuses
+    let baseSuccessRate = bypassTool.successRate[targetNode.vulnerability.toLowerCase() as keyof typeof bypassTool.successRate];
+    const successRateBonus = inventoryEffects.successRateBoosts['bypass'] || 0;
+    const finalSuccessRate = Math.min(1, baseSuccessRate + successRateBonus);
+    
+    const success = Math.random() < finalSuccessRate;
+
+    // Update tool cooldown
+    if (gameContext.onUpdateTools) {
+      const updatedTools = updateToolLastUsed('bypass', gameContext.tools || []);
+      gameContext.onUpdateTools(updatedTools);
+    }
+
+    // Update trace
+    if (gameContext.onTraceUpdate) {
+      gameContext.onTraceUpdate('bypass', `Firewall bypass on ${targetIp}`);
+    }
+
+    // Add to hack history
+    if (gameContext.networkNodes) {
+      const updatedNodes = addHackAttempt(gameContext.networkNodes, targetIp, bypassTool, success, targetNode.vulnerability);
+      if (gameContext.onScan) {
+        gameContext.onScan(updatedNodes);
+      }
+    }
+
+    if (success) {
+      // Update node status
+      targetNode.status = 'Bypassed';
+      
+      // Award crypto
+      const reward = calculateHackReward(targetNode.vulnerability, 'bypass');
+      if (gameContext.onUpdateCryptoWallet && gameContext.cryptoWallet) {
+        const updatedWallet = addTransaction(
+          gameContext.cryptoWallet,
+          'earned',
+          reward,
+          `Firewall bypass: ${targetIp}`
+        );
+        gameContext.onUpdateCryptoWallet(updatedWallet);
+      }
+
+      // Update mission progress
+      if (gameContext.onMissionProgress) {
+        gameContext.onMissionProgress('hack_success', { vulnerability: targetNode.vulnerability });
+        gameContext.onMissionProgress('tool_use', { toolId: 'bypass' });
+      }
+
+      // Update reputation
+      if (gameContext.onReputationUpdate) {
+        const repChange = targetNode.vulnerability === 'High' ? 4 : targetNode.vulnerability === 'Medium' ? 3 : 2;
+        gameContext.onReputationUpdate(repChange, `Successful firewall bypass on ${targetNode.vulnerability} security target`);
+      }
+
+      if (gameContext.onHackSuccess) {
+        gameContext.onHackSuccess();
+      }
+
+      return [
+        `✓ Firewall bypass successful on ${targetIp}`,
+        'Circumvented security measures',
+        `Earned: ${reward} ɄCoins`,
+        'File system access enabled',
+        'You can now download files from this server'
+      ];
+    } else {
+      return [
+        `✗ Firewall bypass failed on ${targetIp}`,
+        'Security measures too advanced',
+        'Intrusion detection system activated',
+        'Connection blocked and logged'
+      ];
+    }
+  },
+
+  inject: (args) => {
+    if (args.length === 0) {
+      return ['Usage: inject <target_ip> [script_name]'];
+    }
+
+    const targetIp = args[0];
+    const scriptName = args[1] || 'default_payload.js';
+    const targetNode = gameContext.networkNodes?.find(node => node.ip === targetIp);
+    
+    if (!targetNode) {
+      return [`Error: Target ${targetIp} not found`];
+    }
+
+    if (targetNode.status !== 'Connected' && targetNode.status !== 'Bruteforced' && targetNode.status !== 'Bypassed') {
+      return [`Error: Must be connected to ${targetIp} first. Use "connect" command.`];
+    }
+
+    const injectTool = gameContext.tools?.find(tool => tool.id === 'inject');
+    if (!injectTool || !injectTool.unlocked) {
+      return ['Error: Code injection tool not available'];
+    }
+
+    if (!checkToolCooldown(injectTool)) {
+      const remaining = Math.ceil((injectTool.cooldown - (Date.now() - injectTool.lastUsed) / 1000));
+      return [`Error: Injection tool on cooldown. ${remaining}s remaining.`];
+    }
+
+    // Apply inventory effects
+    const inventoryEffects = gameContext.playerInventory ? getItemEffects(gameContext.playerInventory) : {
+      cooldownReductions: {},
+      successRateBoosts: {},
+      scanRadiusBonus: 0,
+      stealthBonus: 0,
+      hasAutoExploit: false
+    };
+
+    // Calculate success rate with bonuses
+    let baseSuccessRate = injectTool.successRate[targetNode.vulnerability.toLowerCase() as keyof typeof injectTool.successRate];
+    const successRateBonus = inventoryEffects.successRateBoosts['inject'] || 0;
+    const finalSuccessRate = Math.min(1, baseSuccessRate + successRateBonus);
+    
+    const success = Math.random() < finalSuccessRate;
+
+    // Update tool cooldown
+    if (gameContext.onUpdateTools) {
+      const updatedTools = updateToolLastUsed('inject', gameContext.tools || []);
+      gameContext.onUpdateTools(updatedTools);
+    }
+
+    // Update trace
+    if (gameContext.onTraceUpdate) {
+      gameContext.onTraceUpdate('inject', `Code injection on ${targetIp}`);
+    }
+
+    // Add to hack history
+    if (gameContext.networkNodes) {
+      const updatedNodes = addHackAttempt(gameContext.networkNodes, targetIp, injectTool, success, targetNode.vulnerability);
+      if (gameContext.onScan) {
+        gameContext.onScan(updatedNodes);
+      }
+    }
+
+    if (success) {
+      // Update node status and set temporary downtime
+      targetNode.status = 'Hacked';
+      targetNode.isTemporarilyDown = true;
+      targetNode.downUntil = Date.now() + 60000; // 60 seconds downtime
+      
+      // Award crypto
+      const reward = calculateHackReward(targetNode.vulnerability, 'inject');
+      if (gameContext.onUpdateCryptoWallet && gameContext.cryptoWallet) {
+        const updatedWallet = addTransaction(
+          gameContext.cryptoWallet,
+          'earned',
+          reward,
+          `Code injection: ${targetIp}`
+        );
+        gameContext.onUpdateCryptoWallet(updatedWallet);
+      }
+
+      // Update mission progress
+      if (gameContext.onMissionProgress) {
+        gameContext.onMissionProgress('hack_success', { vulnerability: targetNode.vulnerability });
+        gameContext.onMissionProgress('tool_use', { toolId: 'inject' });
+      }
+
+      // Update reputation
+      if (gameContext.onReputationUpdate) {
+        const repChange = targetNode.vulnerability === 'High' ? 5 : targetNode.vulnerability === 'Medium' ? 4 : 3;
+        gameContext.onReputationUpdate(repChange, `Successful code injection on ${targetNode.vulnerability} security target`);
+      }
+
+      if (gameContext.onHackSuccess) {
+        gameContext.onHackSuccess();
+      }
+
+      return [
+        `✓ Code injection successful on ${targetIp}`,
+        `Payload "${scriptName}" injected into system files`,
+        `Earned: ${reward} ɄCoins`,
+        'Malicious code executed successfully',
+        'Server shutting down... (60 seconds)',
+        'Target system compromised'
+      ];
+    } else {
+      return [
+        `✗ Code injection failed on ${targetIp}`,
+        `Payload "${scriptName}" was detected and blocked`,
+        'Input validation prevented injection',
+        'System integrity maintained'
+      ];
+    }
+  },
+
+  ddos: (args) => {
+    if (args.length === 0) {
+      return ['Usage: ddos <target_ip>'];
+    }
+
+    const targetIp = args[0];
+    const targetNode = gameContext.networkNodes?.find(node => node.ip === targetIp);
+    
+    if (!targetNode) {
+      return [`Error: Target ${targetIp} not found`];
+    }
+
+    if (targetNode.status === 'Hidden') {
+      return [`Error: Target ${targetIp} not scanned. Use "scan" first.`];
+    }
+
+    const ddosTool = gameContext.tools?.find(tool => tool.id === 'ddos');
+    if (!ddosTool || !ddosTool.unlocked) {
+      return ['Error: DDoS tool not available'];
+    }
+
+    if (!checkToolCooldown(ddosTool)) {
+      const remaining = Math.ceil((ddosTool.cooldown - (Date.now() - ddosTool.lastUsed) / 1000));
+      return [`Error: DDoS tool on cooldown. ${remaining}s remaining.`];
+    }
+
+    // Apply inventory effects
+    const inventoryEffects = gameContext.playerInventory ? getItemEffects(gameContext.playerInventory) : {
+      cooldownReductions: {},
+      successRateBoosts: {},
+      scanRadiusBonus: 0,
+      stealthBonus: 0,
+      hasAutoExploit: false
+    };
+
+    // Calculate success rate with bonuses
+    let baseSuccessRate = ddosTool.successRate[targetNode.vulnerability.toLowerCase() as keyof typeof ddosTool.successRate];
+    const successRateBonus = inventoryEffects.successRateBoosts['ddos'] || 0;
+    const finalSuccessRate = Math.min(1, baseSuccessRate + successRateBonus);
+    
+    const success = Math.random() < finalSuccessRate;
+
+    // Update tool cooldown
+    if (gameContext.onUpdateTools) {
+      const updatedTools = updateToolLastUsed('ddos', gameContext.tools || []);
+      gameContext.onUpdateTools(updatedTools);
+    }
+
+    // Update trace
+    if (gameContext.onTraceUpdate) {
+      gameContext.onTraceUpdate('ddos', `DDoS attack on ${targetIp}`);
+    }
+
+    // Add to hack history
+    if (gameContext.networkNodes) {
+      const updatedNodes = addHackAttempt(gameContext.networkNodes, targetIp, ddosTool, success, targetNode.vulnerability);
+      if (gameContext.onScan) {
+        gameContext.onScan(updatedNodes);
+      }
+    }
+
+    if (success) {
+      // Set server as temporarily down
+      targetNode.isTemporarilyDown = true;
+      targetNode.downUntil = Date.now() + 30000; // 30 seconds downtime
+      
+      // Award crypto
+      const reward = calculateHackReward(targetNode.vulnerability, 'ddos');
+      if (gameContext.onUpdateCryptoWallet && gameContext.cryptoWallet) {
+        const updatedWallet = addTransaction(
+          gameContext.cryptoWallet,
+          'earned',
+          reward,
+          `DDoS attack: ${targetIp}`
+        );
+        gameContext.onUpdateCryptoWallet(updatedWallet);
+      }
+
+      // Update mission progress
+      if (gameContext.onMissionProgress) {
+        gameContext.onMissionProgress('tool_use', { toolId: 'ddos' });
+      }
+
+      return [
+        `✓ DDoS attack successful on ${targetIp}`,
+        'Server overwhelmed with traffic',
+        `Earned: ${reward} ɄCoins`,
+        'Target system temporarily disabled',
+        'Server will be down for 30 seconds'
+      ];
+    } else {
+      return [
+        `✗ DDoS attack failed on ${targetIp}`,
+        'Target has DDoS protection enabled',
+        'Traffic filtered by upstream providers',
+        'Server remains operational'
+      ];
+    }
+  },
+
+  download: (args) => {
+    if (args.length === 0) {
+      return ['Usage: download <filename>'];
+    }
+
+    return [
+      'Error: No active server connection',
+      'Use "connect <ip>" to establish a connection first',
+      'Then use the file system terminal to download files'
+    ];
+  },
+
+  // System Commands
+  tools: () => {
+    if (gameContext.onShowTools) {
+      gameContext.onShowTools();
+      return ['Opening tools panel...'];
+    }
+    return ['Tools panel not available'];
+  },
+
+  downloads: () => {
+    if (gameContext.onShowDownloads) {
+      gameContext.onShowDownloads();
+      return ['Opening downloads panel...'];
+    }
+    return ['Downloads panel not available'];
+  },
+
+  history: () => {
+    if (gameContext.onShowHackHistory) {
+      gameContext.onShowHackHistory();
+      return ['Opening hack history panel...'];
+    }
+    return ['Hack history panel not available'];
+  },
+
+  skills: () => {
+    if (gameContext.onShowSkillTree) {
+      gameContext.onShowSkillTree();
+      return ['Opening skill tree panel...'];
+    }
+    return ['Skill tree panel not available'];
+  },
+
+  wallet: () => {
+    if (gameContext.onShowCryptoWallet) {
+      gameContext.onShowCryptoWallet();
+      return ['Opening crypto wallet panel...'];
+    }
+    return ['Crypto wallet panel not available'];
+  },
+
+  missions: () => {
+    if (gameContext.onShowMissions) {
+      gameContext.onShowMissions();
+      return ['Opening missions panel...'];
+    }
+    return ['Missions panel not available'];
+  },
+
+  darkweb: () => {
+    if (gameContext.onShowBlackMarket) {
+      gameContext.onShowBlackMarket();
+      return ['Accessing dark web marketplace...'];
+    }
+    return ['Dark web access not available'];
+  },
+
+  inventory: () => {
+    if (gameContext.onShowInventory) {
+      gameContext.onShowInventory();
+      return ['Opening inventory panel...'];
+    }
+    return ['Inventory panel not available'];
+  },
+
+  reputation: () => {
+    if (gameContext.onShowReputation) {
+      gameContext.onShowReputation();
+      return ['Opening reputation panel...'];
+    }
+    return ['Reputation panel not available'];
+  },
+
+  proxy: (args) => {
+    if (args.length === 0) {
+      return ['Usage: proxy <on|off>'];
+    }
+
+    const command = args[0].toLowerCase();
+    if (command !== 'on' && command !== 'off') {
+      return ['Usage: proxy <on|off>'];
+    }
+
+    if (gameContext.onProxyCommand) {
+      const result = gameContext.onProxyCommand(command as 'on' | 'off');
+      return [result];
+    }
+
+    return ['Proxy control not available'];
+  },
+
+  logs: (args) => {
+    if (args.length === 0) {
+      return ['Usage: logs <server_ip>'];
+    }
+
+    const serverIp = args[0];
+    if (gameContext.onDeleteLogs) {
+      const result = gameContext.onDeleteLogs(serverIp);
+      return [result];
+    }
+
+    return ['Log deletion not available'];
+  },
+
+  reset: () => {
+    if (gameContext.onResetGame) {
+      gameContext.onResetGame();
+      return ['Game reset initiated...'];
+    }
+    return ['Reset function not available'];
+  },
   
-  return [
-    `Initiating ${tool.name} attack on ${targetIp}...`,
-    `Target vulnerability: ${targetNode.vulnerability}`,
-    'Executing attack sequence...',
-    '',
-    'Progress will be displayed below:'
+  status: () => {
+    const reputation = gameContext.reputationState?.rank?.name || 'Unknown';
+    const balance = gameContext.cryptoWallet?.balance || 0;
+    const traceLevel = gameContext.traceState?.level || 0;
+    const toolsCount = gameContext.tools?.filter(t => t.unlocked).length || 0;
+    const skillPoints = gameContext.skillTree?.skillPoints || 0;
+
+    return [
+      '╔══════════════════════════════════════════════════════════════╗',
+      '║                      SYSTEM STATUS                           ║',
+      '╠══════════════════════════════════════════════════════════════╣',
+      `║ Reputation: ${reputation.padEnd(20)} ║`,
+      `║ ɄCoin Balance: ${balance.toString().padEnd(15)} ║`,
+      `║ Skill Points: ${skillPoints.toString().padEnd(16)} ║`,
+      `║ Trace Level: ${traceLevel.toFixed(1)}%`.padEnd(30) + ' ║',
+      `║ Tools Available: ${toolsCount.toString().padEnd(12)} ║`,
+      '╚══════════════════════════════════════════════════════════════╝'
+    ];
+  }
+};
+
+// Helper function to generate random passwords
+function generateRandomPassword(): string {
+  const passwords = [
+    'password123',
+    'admin2023',
+    'qwerty456',
+    'letmein',
+    'welcome1',
+    'secret789'
   ];
-};
+  return passwords[Math.floor(Math.random() * passwords.length)];
+}
 
-const getToolExample = (toolId: string): string => {
-  switch (toolId) {
-    case 'bruteforce': return 'bruteforce 192.168.1.100';
-    case 'ddos': return 'ddos 192.168.1.100';
-    case 'inject': return 'inject 192.168.1.100 malware.js';
-    case 'bypass': return 'bypass 192.168.1.100 corporate_firewall';
-    default: return `${toolId} 192.168.1.100`;
+function parseCommandString(input: string): ParsedCommand {
+  const trimmed = input.trim();
+  if (!trimmed) {
+    return { command: '', args: [], flags: {} };
   }
-};
 
-export const parseCommand = (input: string): CommandResult => {
-  // Check if game is over due to trace
-  if (commandContext && commandContext.traceState.gameOver) {
-    return {
-      command: input,
-      output: [
-        '🚨 SYSTEM LOCKED DOWN 🚨',
-        '',
-        'Your location has been compromised.',
-        'All network access has been terminated.',
-        'Use the reset button to start a new operation.'
-      ],
-      timestamp: new Date(),
-    };
+  const parts = trimmed.split(/\s+/);
+  const command = parts[0];
+  const args: string[] = [];
+  const flags: Record<string, string | boolean> = {};
+
+  for (let i = 1; i < parts.length; i++) {
+    const part = parts[i];
+    
+    if (part.startsWith('--')) {
+      // Long flag
+      const flagName = part.substring(2);
+      if (flagName.includes('=')) {
+        const [key, value] = flagName.split('=', 2);
+        flags[key] = value;
+      } else {
+        flags[flagName] = true;
+      }
+    } else if (part.startsWith('-') && part.length > 1) {
+      // Short flag(s)
+      const flagChars = part.substring(1);
+      for (const char of flagChars) {
+        flags[char] = true;
+      }
+    } else {
+      // Regular argument
+      args.push(part);
+    }
+  }
+
+  return { command, args, flags };
+}
+
+export function parseCommand(input: string): CommandResult {
+  const parsed = parseCommandString(input);
+  const { command, args, flags } = parsed;
+  
+  // Add to history
+  addToHistory(input);
+  
+  // Execute command
+  let output: string[];
+  
+  if (commands[command]) {
+    try {
+      output = commands[command](args, flags);
+    } catch (error) {
+      output = [`Error executing command: ${error instanceof Error ? error.message : 'Unknown error'}`];
+    }
+  } else if (command === '') {
+    output = [];
+  } else {
+    output = [`Command not found: ${command}. Type 'help' for available commands.`];
   }
   
-  const trimmedInput = input.trim();
-  const [commandName, ...args] = trimmedInput.split(' ');
-  
-  if (!commandName) {
-    return {
-      command: input,
-      output: [''],
-      timestamp: new Date(),
-    };
-  }
-
-  const commands = getCommands();
-  const command = commands[commandName.toLowerCase()];
-  
-  if (!command) {
-    return {
-      command: input,
-      output: [`Command not found: ${commandName}`, 'Type "help" for available commands.'],
-      timestamp: new Date(),
-    };
-  }
-
-  // Special handling for clear command
-  if (commandName.toLowerCase() === 'clear') {
-    return {
-      command: input,
-      output: ['CLEAR'],
-      timestamp: new Date(),
-    };
-  }
-
   return {
     command: input,
-    output: command.execute(args),
-    timestamp: new Date(),
+    output,
+    timestamp: new Date()
   };
-};
+}
 
-export const getAvailableCommands = (): Command[] => {
-  return Object.values(getCommands());
-};
+export function setCommandContext(context: Partial<CommandContext>): void {
+  gameContext = { ...gameContext, ...context };
+  commandContext = gameContext;
+}
+
+export function getCommandContext(): CommandContext {
+  return { ...commandContext };
+}
+
+export function addToHistory(command: string): void {
+  commandContext.history.push(command);
+  // Keep only last 100 commands
+  if (commandContext.history.length > 100) {
+    commandContext.history = commandContext.history.slice(-100);
+  }
+}
+
+export function getCommandHistory(): string[] {
+  return [...commandContext.history];
+}
+
+export function setCurrentDirectory(directory: string): void {
+  commandContext.currentDirectory = directory;
+}
+
+export function getCurrentDirectory(): string {
+  return commandContext.currentDirectory;
+}
+
+export function setEnvironmentVariable(key: string, value: string): void {
+  commandContext.environment[key] = value;
+}
+
+export function getEnvironmentVariable(key: string): string | undefined {
+  return commandContext.environment[key];
+}
+
+export function getAllEnvironmentVariables(): Record<string, string> {
+  return { ...commandContext.environment };
+}

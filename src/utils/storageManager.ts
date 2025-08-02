@@ -2,6 +2,7 @@
 import { MissionState } from '../types/missions';
 import { BlackMarketState, PlayerInventory } from '../types/inventory';
 import { TraceState } from '../types/trace';
+import { ReputationState } from '../types/reputation';
 
 const STORAGE_KEY = 'hackingGameState';
 
@@ -16,6 +17,7 @@ export interface GameState {
   blackMarket?: BlackMarketState;
   playerInventory?: PlayerInventory;
   traceState?: TraceState;
+  reputationState?: ReputationState;
   playerPosition?: { x: number; y: number };
 }
 
